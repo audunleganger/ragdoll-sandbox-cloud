@@ -162,8 +162,8 @@ upright *in the world* (a trick from SIMBICON, a well-known walking controller).
 person **braces**: arms thrown toward the fall, chin tucked, knees soft. After
 landing, muscle tone fades to ~12% over 1.5 s: lying there, not a noodle.
 
-**How strong a shove can they take?** About 30–35 N·s at the chest (a 40 kg
-crate at 1 m/s). Ankles alone managed 20–25.
+**How strong a shove can they take?** About 30–35 N·s at the chest (like a
+30 kg crate hitting at 1 m/s). Ankles alone managed 20–25.
 
 ## 6. Shooting (`weapons.rs`)
 
@@ -204,7 +204,9 @@ view). If a wall gets between camera and player, a ray finds the wall and pulls
 the camera in front of it.
 
 **Shoulder-barging:** when the controller reports bumping into a body part
-while moving, we kick that part with an impulse proportional to your speed.
+while moving, we kick that part with an impulse that grows with your speed
+*squared* (like collision energy): walking into someone (~11 N·s) nudges
+them; sprinting (~45 N·s) knocks them into a stagger or over.
 
 ## 9. Collision layers (`layers.rs`)
 

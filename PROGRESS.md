@@ -3,6 +3,14 @@
 Newest first. Each entry says what was built, how it was checked, and what
 you should look at when you run it.
 
+## Shoulder-barge checked and tuned ✅
+
+Never checked before; now verified in the game (with a log line per barge).
+It was far too strong: walking into the person gave 38 N·s per bump, which
+knocked them flat and then kept shoving the body. Now the shove grows with
+speed squared: **walking** (4 m/s) = 11 N·s, and six bumps in a row left them
+standing; **sprinting** (8 m/s) = 45 N·s, and they went down.
+
 ## Real game timing ✅ (with a frame-rate caveat)
 
 All earlier tests advanced physics one fixed step at a time. The game itself
@@ -205,11 +213,12 @@ representative of your PC. The controller runs once per frame.
 
 **Please check when you run it**
 - Does the standing pose look natural?
-- Press G (limp) then G again: the person can't get back up from the floor
-  (out of scope), but tone returns. Press R to reset.
+- Press G (limp): they collapse. Pressing G again restores your tone setting,
+  but once they're lying down the balance "brain" keeps them relaxed
+  (getting up is out of scope). Press R to reset.
 - Play with − / = while they stand (press R between tries). Measured headless:
-  at 60% they visibly sag (head drops 13 cm); at 50% and below they topple
-  over stiffly. That matches the ankle calculation in `HOW_IT_WORKS.md`:
+  at 60% they sag a little (Stage 2: head 13 cm lower; with Stage 3 balance:
+  4 cm); at 50% and below they topple over, with or without balance. That matches the ankle calculation in `HOW_IT_WORKS.md`:
   2 ankles × 900 N·m/rad × tone must beat ~800 N·m/rad, which fails just
   under 45%.
 

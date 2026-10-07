@@ -24,8 +24,11 @@ const JUMP_SPEED: f32 = 5.0;
 const GRAVITY: f32 = 9.81;
 const MOUSE_SENSITIVITY: f32 = 0.0025;
 
-/// How hard running into the person shoves them: impulse (N·s) per m/s of speed.
-const BARGE_STRENGTH: f32 = 9.0;
+/// How hard running into the person shoves them. The shove grows with your
+/// speed *squared* (like the energy of a collision): walking (4 m/s) gives
+/// ~11 N·s, a nudge they can catch; sprinting (8 m/s) ~45 N·s, enough to
+/// make them stagger or fall. (They can take ~30 N·s; see PROGRESS.md.)
+const BARGE_STRENGTH: f32 = 0.7;
 /// Seconds between shoves, so walking into someone isn't one shove per frame.
 const BARGE_COOLDOWN: f32 = 0.35;
 
@@ -222,8 +225,12 @@ fn barge(
     for collision in &output.collisions {
         if let Ok(mut impulse) = parts.get_mut(collision.entity) {
             // Mostly along your direction of travel, slightly upward.
-            impulse.impulse += (horizontal + Vec3::Y * 0.3 * horizontal.length()) * BARGE_STRENGTH;
+            let speed = horizontal.length();
+            let direction = (horizontal / speed + Vec3::Y * 0.3).normalize();
+            let kick = direction * BARGE_STRENGTH * speed * speed;
+            impulse.impulse += kick;
             player.barge_cooldown = BARGE_COOLDOWN;
+            debug!("Barged into the person at {:.1} m/s: {:.0} N·s", horizontal.length(), kick.length());
         }
     }
 }
