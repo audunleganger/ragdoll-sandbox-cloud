@@ -412,6 +412,15 @@ fn step_target(
     Some(Vec3::new(target.x, ground.y, target.z))
 }
 
+/// Extra (hip, knee, ankle) bend that makes a leg `amount` metres shorter.
+/// A leg of two equal segments bent by angle k is 2 · segment · cos(k/2)
+/// long; solve that for k. The hip bends forward and the ankle back by half
+/// as much, so the foot stays flat and the thigh and shin symmetric.
+fn leg_shortening(amount: f32) -> Vec3 {
+    let k = 2.0 * ((THIGH + SHIN - amount) / (THIGH + SHIN)).clamp(-1.0, 1.0).acos();
+    Vec3::new(-k / 2.0, k, -k / 2.0)
+}
+
 /// Joint angles (hip, knee, ankle) that put a leg's ankle at `ankle_world`
 /// with the foot flat. Two-segment "inverse kinematics": given where the end
 /// of the leg should be, work out the joint angles.
@@ -524,12 +533,27 @@ fn think(
             let ankle_pitch = (forward_error * tuning.ankle_gain_forward).clamp(-max, max);
             let ankle_roll = (left_error * tuning.ankle_gain_sideways).clamp(-max, max);
             let hip_pitch = -forward_error * tuning.hip_gain;
-            let slope = |foot: Vec3| {
-                ground_below(&rapier, foot + Vec3::Y * 0.2, 0.5)
-                    .map(|(_, normal)| slope_compensation(normal, &body))
-                    .unwrap_or(Vec3::ZERO)
+            let ground_l = ground_below(&rapier, body.foot_l + Vec3::Y * 0.2, 0.5);
+            let ground_r = ground_below(&rapier, body.foot_r + Vec3::Y * 0.2, 0.5);
+            let slope = |ground: Option<(Vec3, Vec3)>| ground.map(|(_, n)| slope_compensation(n, &body)).unwrap_or(Vec3::ZERO);
+            let (slope_l, slope_r) = (slope(ground_l), slope(ground_r));
+            // Standing *across* a slope, the uphill foot is higher, so with
+            // equal straight legs the pelvis (and everything above) would tilt
+            // downhill. People bend the uphill knee; so do we. How much higher
+            // that foot is follows from the slope (not from measured foot
+            // heights, which also differ mid-stagger on flat ground).
+            let (bend_l, bend_r) = match (ground_l, ground_r) {
+                // Need ground under both feet, and at least one foot on it.
+                // (Not necessarily both: on arrival the downhill foot dangles
+                // until the uphill knee bends and lowers the body.)
+                (Some((gl, nl)), Some((gr, nr))) if (body.foot_l.y - gl.y).abs().min((body.foot_r.y - gr.y).abs()) < 0.02 => {
+                    let across = (-((nl + nr) / 2.0).normalize().dot(body.left)).clamp(-0.5, 0.5).asin();
+                    let separation = (body.foot_l - body.foot_r).dot(body.left);
+                    let rise = separation * across.tan(); // > 0: left foot higher
+                    (leg_shortening(rise.max(0.0)), leg_shortening((-rise).max(0.0)))
+                }
+                _ => (Vec3::ZERO, Vec3::ZERO),
             };
-            let (slope_l, slope_r) = (slope(body.foot_l), slope(body.foot_r));
             for (part, mut target) in &mut targets {
                 let mut angles = standing_pose(part.part);
                 match part.part {
@@ -537,8 +561,12 @@ fn think(
                         angles.x += ankle_pitch + tuning.lean;
                         angles.z -= ankle_roll;
                         angles += if part.part == BodyPart::FootL { slope_l } else { slope_r };
+                        angles.x += if part.part == BodyPart::FootL { bend_l.z } else { bend_r.z };
                     }
-                    BodyPart::ThighL | BodyPart::ThighR => angles.x += hip_pitch,
+                    BodyPart::ShinL => angles.x += bend_l.y,
+                    BodyPart::ShinR => angles.x += bend_r.y,
+                    BodyPart::ThighL => angles.x += hip_pitch + bend_l.x,
+                    BodyPart::ThighR => angles.x += hip_pitch + bend_r.x,
                     _ => {}
                 }
                 target.0 = angles;

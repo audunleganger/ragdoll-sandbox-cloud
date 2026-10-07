@@ -326,6 +326,7 @@ fn respawn_ragdoll(
     mut commands: Commands,
     mut requests: MessageReader<SpawnRagdoll>,
     existing: Query<Entity, With<RagdollPart>>,
+    rapier: ReadRapierContext,
 ) {
     let Some(request) = requests.read().last().copied() else {
         return;
@@ -333,5 +334,32 @@ fn respawn_ragdoll(
     for entity in &existing {
         commands.entity(entity).despawn();
     }
-    spawn_ragdoll(&mut commands, request.position, request.yaw);
+    let position = place_feet_on_ground(&rapier, request.position, request.yaw);
+    spawn_ragdoll(&mut commands, position, request.yaw);
+}
+
+/// Adjust a spawn height so neither foot starts *inside* the ground: on a
+/// slope or a stair edge one foot's ground is higher than the other's. Look
+/// down under each foot and lift the body until the higher one sits on top.
+/// (A foot spawned inside solid ground gets shoved out violently.)
+fn place_feet_on_ground(rapier: &ReadRapierContext, feet: Vec3, yaw: f32) -> Vec3 {
+    let Ok(context) = rapier.single() else { return feet };
+    let rotation = Quat::from_rotation_y(yaw);
+    let only_world = QueryFilter::new().groups(CollisionGroups::new(Group::ALL, layers::WORLD));
+    let mut highest: Option<f32> = None;
+    // Under the heel and the toe of each foot.
+    for x in [HIP_X, -HIP_X] {
+        for z in [-0.07, 0.15] {
+            let above = feet + rotation * Vec3::new(x, 0.0, z) + Vec3::Y * 0.6;
+            let hit = context.with_query_pipeline(only_world, |q| q.cast_ray(above, Vec3::NEG_Y, 1.2, true));
+            if let Some((_, distance)) = hit {
+                let ground = above.y - distance;
+                highest = Some(highest.map_or(ground, |h: f32| h.max(ground)));
+            }
+        }
+    }
+    match highest {
+        Some(ground) => Vec3::new(feet.x, ground + 0.005, feet.z),
+        None => feet, // nothing below (spawned in the air): just drop
+    }
 }

@@ -19,7 +19,7 @@ before this change, and tell me.
 ```sh
 git pull
 cargo run                      # first build takes 5–15 minutes
-cargo test                     # 22 headless tests (body + player), ~25 s
+cargo test                     # 23 headless tests (body + player), ~25 s
 RUST_LOG=ragdoll_sandbox=debug cargo run   # also logs every hit and barge
 ```
 
@@ -42,8 +42,9 @@ too weak, odd poses. Every number is a named constant near the top of its file.
 - The hardest shoves they catch: ~25–30 N·s forward, 30–35 back, 35–40
   sideways (a single pistol shot is 16 N·s). 30 N·s forward is right at the
   edge, so it sometimes holds and sometimes doesn't.
-- On **stairs** shoves usually end in a fall; standing **across** the ramp's
-  slope doesn't work (up/down the ramp does). Details below in "Terrain".
+- They stand anywhere on the map (flat, platform, stairs, ramp in any
+  direction), but on **stairs and the ramp** most shoves end in a fall:
+  stepping on uneven ground isn't handled well. Details below in "Terrain".
 - Getting back up, walking on their own, and shot reactions per body part
   (e.g. clutching a wounded arm) are not built.
 - My visual checks ran on a virtual screen with software rendering at a few
@@ -53,6 +54,17 @@ too weak, odd poses. Every number is a named constant near the top of its file.
 
 Newest first. Each entry says what was built, how it was checked, and what
 you should look at when you run it.
+
+## Standing across the ramp ✅
+
+- Standing sideways on the 14° ramp now works: the person bends the uphill knee
+  so the pelvis stays level. How much is worked out from the *slope of the
+  ground* (measured with rays), not from the feet's heights. My first try used
+  foot heights, which also differ mid-stagger on flat ground, and broke staggers.
+- Spawning (R, F) now lifts the body so neither foot starts *inside* a slope
+  or a stair (a ray under each heel and toe).
+- Shoves on the ramp: 25 N·s forward is caught; most other directions end in a
+  fall. Stepping on a slope isn't handled well (known limit).
 
 ## Re-checked every interaction after the 120 Hz change ✅ (found a jump bug)
 

@@ -332,6 +332,12 @@ fn on_the_ramp_facing_uphill_they_stand() {
 }
 
 #[test]
+fn across_the_ramp_they_stand_by_bending_the_uphill_knee() {
+    let (stood, _, _) = terrain_trial(Vec3::new(-10.0, 1.13, -8.0), 0.0, 0.0, 1.0, 0.0);
+    assert!(stood, "couldn't stand facing across the ramp");
+}
+
+#[test]
 fn pushed_off_the_platform_edge_they_fall_to_the_ground_below() {
     use ragdoll_sandbox::balance::BalanceState;
     let mut app = active();
@@ -900,6 +906,58 @@ fn print_placement_sweep() {
                 "overshoot={overshoot:.2} width={width:.2}: fwd={} back={} left={} right={}",
                 max_survived(t, 1.0, 0.0), max_survived(t, -1.0, 0.0), max_survived(t, 0.0, 1.0), max_survived(t, 0.0, -1.0)
             );
+        }
+    }
+}
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_cross_slope() {
+    let mut app = active();
+    respawn_at(&mut app, Vec3::new(-10.0, 1.13, -8.0), 0.0);
+    for i in 0..12 {
+        run_seconds(&mut app, 0.15);
+        let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+        let (_, fl, _) = part(&mut app, BodyPart::FootL);
+        let (_, fr, _) = part(&mut app, BodyPart::FootR);
+        let knee_l = joint_angle(&mut app, BodyPart::ThighL, BodyPart::ShinL, 0);
+        let knee_r = joint_angle(&mut app, BodyPart::ThighR, BodyPart::ShinR, 0);
+        let up = pelvis.rotation * Vec3::Y;
+        let foot_roll_l = 2.0 * joint_angle(&mut app, BodyPart::ShinL, BodyPart::FootL, 2) / 2.0;
+        println!(
+            "t={:.2} pelvis y={:.2} tilt x={:+.2} | footL y={:.3} x={:.2} footR y={:.3} x={:.2} | knees L={knee_l:.2} R={knee_r:.2} ankle roll L={foot_roll_l:+.2}",
+            (i + 1) as f32 * 0.15, pelvis.translation.y, up.x, fl.translation.y, fl.translation.x, fr.translation.y, fr.translation.x
+        );
+    }
+}
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_cross_slope_start() {
+    use ragdoll_sandbox::balance::Balance;
+    use ragdoll_sandbox::ragdoll::SpawnRagdoll;
+    let mut app = active();
+    app.update();
+    app.world_mut().write_message(SpawnRagdoll { position: Vec3::new(-10.0, 1.13, -8.0), yaw: 0.0 });
+    for i in 0..14 {
+        run_seconds(&mut app, 0.04);
+        let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+        let (_, fl, _) = part(&mut app, BodyPart::FootL);
+        let (_, fr, _) = part(&mut app, BodyPart::FootR);
+        let up = pelvis.rotation * Vec3::Y;
+        let mut q = app.world_mut().query::<&Balance>();
+        let b = q.single(app.world()).map(|b| format!("{:?} cp-sup x={:+.2}", b.state, b.capture_point.x - b.support_center.x).chars().take(40).collect::<String>()).unwrap_or_default();
+        println!("t={:.2} pelvis y={:.3} tilt x={:+.3} | footL y={:.3} footR y={:.3} | {b}", (i + 1) as f32 * 0.04, pelvis.translation.y, up.x, fl.translation.y, fr.translation.y);
+    }
+}
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_ramp_25() {
+    for (name, yaw) in [("uphill", std::f32::consts::FRAC_PI_2), ("across", 0.0)] {
+        for (dir, f, l) in [("fwd", 1.0, 0.0), ("back", -1.0, 0.0), ("left", 0.0, 1.0), ("right", 0.0, -1.0)] {
+            let (stood, survived, _) = terrain_trial(Vec3::new(-10.0, 1.13, -8.0), yaw, 25.0, f, l);
+            println!("ramp {name:<6} 25 N·s {dir:<5}: stood={stood} survived={survived}");
         }
     }
 }
