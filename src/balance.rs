@@ -33,7 +33,6 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::{CollisionGroups, Group, QueryFilter, RapierRigidBodyHandle, ReadRapierContext, Velocity};
 
 use crate::layers;
-
 use crate::muscles::{JointTarget, ToneScale, standing_pose};
 use crate::ragdoll::{BodyPart, RagdollPart};
 
@@ -68,15 +67,30 @@ pub struct BalanceTuning {
 
 impl Default for BalanceTuning {
     fn default() -> Self {
-        // Picked by sweeping values in the `print_tuning_sweep` test. Gentle
-        // gains do best: pushing harder only rolls the feet onto their edges.
-        BalanceTuning { ankle_gain_forward: 1.0, ankle_gain_sideways: 1.0, hip_gain: 1.5, max_ankle_correction: 0.2, lean: -0.02, stepping: true, step_duration: 0.32, pelvis_pitch_gain: 1.5, pelvis_roll_gain: -1.0 }
+        // All picked by sweeping values in the `print_*_sweep` tests and keeping
+        // the best. Gentle ankle gains do best: pushing harder only rolls the
+        // feet onto their edges.
+        BalanceTuning {
+            ankle_gain_forward: 1.0,
+            ankle_gain_sideways: 1.0,
+            hip_gain: 1.5,
+            max_ankle_correction: 0.2,
+            lean: -0.02,
+            stepping: true,
+            step_duration: 0.32,
+            pelvis_pitch_gain: 1.5,
+            // Negative: the sweep showed the positive sign halves how hard a
+            // sideways shove they can take.
+            pelvis_roll_gain: -1.0,
+        }
     }
 }
 
 /// The feet span roughly 24 cm front-to-back and 28 cm side-to-side. Without
 /// stepping, a capture point further than this from their centre is hopeless.
 const FALL_THRESHOLD: f32 = 0.30;
+/// Also give up if the chest leans more than this (radians, ~40°).
+const FALL_TILT: f32 = 0.7;
 
 // --- Stepping ---------------------------------------------------------------
 /// Take a step once the capture point is this far (m) from the feet's centre:
@@ -110,8 +124,6 @@ const HIP_OFFSET: Vec3 = Vec3::new(0.09, -0.05, 0.0);
 /// front of the ankle.
 const ANKLE_HEIGHT: f32 = 0.09;
 const FOOT_FORWARD: f32 = 0.04;
-/// Also give up if the chest leans more than this (radians, ~40°).
-const FALL_TILT: f32 = 0.7;
 
 /// Muscle tone while falling (bracing) and after landing (lying there).
 /// Bracing is a reflex: it has to be fast, so muscles stay fully tensed while
@@ -344,23 +356,16 @@ fn plan_step(
     capture_point: Vec3,
     last: Option<Side>,
 ) -> Option<(Side, Vec3, Vec3)> {
-    let error = (capture_point - body.support_center) * Vec3::new(1.0, 0.0, 1.0);
-    let lateral = error.dot(body.left);
-    let forward = error.dot(body.forward);
+    let lateral = (capture_point - body.support_center).dot(body.left);
     // After a step, the leg that just landed is carrying the body, so the
-    // next step is always with the other leg, like walking. For the first
-    // step: if pushed mostly sideways, step with the leg on that side (so the
-    // legs never cross); otherwise with the leg on the side the push leans to.
+    // next step is always with the other leg, like walking. The first step is
+    // with the leg on the side the body is heading toward, so a sideways push
+    // never makes the legs cross.
     let side = match last {
         Some(previous) => previous.other(),
-        None if lateral.abs() > 0.6 * forward.abs() => {
-            if lateral > 0.0 { Side::Left } else { Side::Right }
-        }
-        None => {
-            if lateral >= 0.0 { Side::Left } else { Side::Right }
-        }
+        None if lateral >= 0.0 => Side::Left,
+        None => Side::Right,
     };
-    let _ = forward;
     let swing = match side {
         Side::Left => body.foot_l,
         Side::Right => body.foot_r,
