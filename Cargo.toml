@@ -1,0 +1,17 @@
+[package]
+name = "ragdoll-sandbox"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = "=0.19.0"
+# Rapier physics for Bevy. Only the 3D feature: we draw our own meshes.
+bevy_rapier3d = { version = "=0.36.0", default-features = false, features = ["dim3"] }
+
+# Compile dependencies with optimizations even in debug builds: physics is far
+# too slow unoptimized, but our own code stays quick to recompile.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
