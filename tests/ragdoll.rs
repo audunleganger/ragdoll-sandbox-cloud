@@ -254,6 +254,33 @@ fn balance_works_when_the_controller_only_runs_60_times_a_second() {
     assert!(pelvis.translation.y > 0.8, "a small shove toppled them at a 60 Hz control rate");
 }
 
+#[test]
+fn one_pistol_shot_rocks_but_does_not_drop_them() {
+    use ragdoll_sandbox::weapons::PISTOL_IMPULSE;
+    // Shots as fired in the game: from the over-the-shoulder camera at the
+    // start position, at the chest, centre and off-centre (which also twists).
+    for target in [Vec3::new(0.0, 1.35, -0.1), Vec3::new(0.16, 1.33, -0.16), Vec3::new(-0.16, 1.33, -0.16)] {
+        let mut app = active();
+        run_seconds(&mut app, 1.0);
+        shoot_like_game(&mut app, Vec3::new(-0.9, 1.8, -9.5), target, BodyPart::Chest, PISTOL_IMPULSE);
+        run_seconds(&mut app, 4.0);
+        let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+        assert!(pelvis.translation.y > 0.8, "one pistol shot at {target} dropped them");
+    }
+}
+
+#[test]
+fn a_shotgun_blast_drops_them() {
+    let mut app = active();
+    run_seconds(&mut app, 1.0);
+    for _ in 0..9 {
+        shoot_like_game(&mut app, Vec3::new(-0.9, 1.8, -9.5), Vec3::new(0.0, 1.3, -0.1), BodyPart::Chest, 10.0);
+    }
+    run_seconds(&mut app, 4.0);
+    let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+    assert!(pelvis.translation.y < 0.5, "still standing after a point-blank shotgun blast");
+}
+
 // ---------------------------------------------------------------------------
 // Diagnostics
 // ---------------------------------------------------------------------------
@@ -287,9 +314,12 @@ fn print_stand() {
         let com = center_of_mass(&mut app);
         let ankle = joint_angle(&mut app, BodyPart::ShinL, BodyPart::FootL, 0);
         let knee = joint_angle(&mut app, BodyPart::ThighL, BodyPart::ShinL, 0);
+        let (_, fl, flv) = part(&mut app, BodyPart::FootL);
+        let (_, fr, _) = part(&mut app, BodyPart::FootR);
         println!(
-            "t={:.1}s pelvis y={:.3} COM=({:.3},{:.3}) head speed={:.4} ankleL={ankle:.3} kneeL={knee:.3}",
-            (step + 1) as f32 * 0.5, pelvis.translation.y, com.x, com.z, head_v.linear.length()
+            "t={:.1}s pelvis y={:.3} COM=({:.3},{:.3}) head speed={:.4} ankleL={ankle:.3} kneeL={knee:.3} footL=({:.4},{:.4}) footR=({:.4},{:.4}) footL v={:.4}",
+            (step + 1) as f32 * 0.5, pelvis.translation.y, com.x, com.z, head_v.linear.length(),
+            fl.translation.x, fl.translation.z, fr.translation.x, fr.translation.z, flv.linear.length()
         );
     }
 }
@@ -419,7 +449,7 @@ fn print_tuning_sweep() {
     for ankle in [1.0, 2.5, 4.0] {
         for max in [0.12, 0.2, 0.35] {
             for hip in [-1.5, 0.0, 1.5] {
-                let t = BalanceTuning { ankle_gain_forward: ankle, ankle_gain_sideways: ankle, hip_gain: hip, max_ankle_correction: max };
+                let t = BalanceTuning { ankle_gain_forward: ankle, ankle_gain_sideways: ankle, hip_gain: hip, max_ankle_correction: max, lean: 0.0 };
                 let f = max_survived(t, 1.0, 0.0);
                 let b = max_survived(t, -1.0, 0.0);
                 let l = max_survived(t, 0.0, 1.0);
@@ -505,4 +535,87 @@ fn run_seconds_keep(app: &mut App, seconds: f32, f: f32, l: f32) {
             }
         }
     }
+}
+
+/// Fire one shot like the game does: from `camera` toward `target` (world
+/// space), hitting `body_part` at `target`.
+fn shoot_like_game(app: &mut App, camera: Vec3, target: Vec3, which: BodyPart, strength: f32) {
+    let (entity, transform, _) = part(app, which);
+    let dir = (target - camera).normalize();
+    let mut impulse = app.world_mut().get_mut::<ExternalImpulse>(entity).unwrap();
+    ragdoll_sandbox::weapons::apply_hit(&mut impulse, transform.translation, target, dir * strength);
+}
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_game_shot_and_control_rate() {
+    // 1. The exact shot from the screenshot session, at the normal rate.
+    for strength in [15.0, 18.0, 22.0] {
+        let mut app = active();
+        run_seconds(&mut app, 1.0);
+        shoot_like_game(&mut app, Vec3::new(-0.9, 1.8, -9.5), Vec3::new(0.16, 1.33, -0.16), BodyPart::Chest, strength);
+        run_seconds(&mut app, 4.0);
+        let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+        println!("game-like shot {strength} N·s at 120 Hz control: {}", if pelvis.translation.y > 0.8 { "stands" } else { "FALLS" });
+    }
+    // 2. Same 20 N·s backward shove at lower controller rates.
+    for hz in [60.0f32, 30.0, 15.0] {
+        let mut app = active();
+        let substeps = (480.0 / hz).round() as usize;
+        app.insert_resource(TimestepMode::Fixed { dt: 1.0 / hz, substeps });
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(1.0 / hz)));
+        for _ in 0..hz as usize {
+            app.update();
+        }
+        let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+        let (chest, _, _) = part(&mut app, BodyPart::Chest);
+        app.world_mut().get_mut::<ExternalImpulse>(chest).unwrap().impulse = pelvis.rotation * Vec3::NEG_Z * 20.0;
+        for _ in 0..(hz * 4.0) as usize {
+            app.update();
+        }
+        let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+        println!("20 N·s backward shove, controller at {hz} Hz: {}", if pelvis.translation.y > 0.8 { "stands" } else { "FALLS" });
+    }
+}
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_lean_sweep() {
+    use ragdoll_sandbox::balance::BalanceTuning;
+    for lean in [0.0, -0.02, -0.04, -0.06, -0.08] {
+        let t = BalanceTuning { lean, ..default() };
+        let f = max_survived(t, 1.0, 0.0);
+        let b = max_survived(t, -1.0, 0.0);
+        let l = max_survived(t, 0.0, 1.0);
+        println!("lean={lean:+.2}: fwd={f:>3} back={b:>3} side={l:>3}");
+    }
+}
+
+#[test]
+#[ignore = "diagnostic: EXP=coulomb,fbias,wsj"]
+fn print_creep_experiment() {
+    use bevy_rapier3d::rapier::dynamics::FrictionModel;
+    let exp = std::env::var("EXP").unwrap_or_default();
+    let mut app = active();
+    app.update();
+    {
+        let mut q = app.world_mut().query::<&mut RapierContextSimulation>();
+        for mut sim in q.iter_mut(app.world_mut()) {
+            let p = &mut sim.integration_parameters;
+            for e in exp.split(',') {
+                match e {
+                    "coulomb" => p.friction_model = FrictionModel::Coulomb,
+                    "fbias" => p.friction_in_bias_pass = true,
+                    "wsj" => p.warmstart_joints = true,
+                    _ => {}
+                }
+            }
+        }
+    }
+    run_seconds(&mut app, 2.0);
+    let (_, a, _) = part(&mut app, BodyPart::FootL);
+    run_seconds(&mut app, 10.0);
+    let (_, b, _) = part(&mut app, BodyPart::FootL);
+    let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+    println!("EXP={exp:<20} foot slid {:.1} mm in 10 s, pelvis y {:.2}", (b.translation - a.translation).length() * 1000.0, pelvis.translation.y);
 }

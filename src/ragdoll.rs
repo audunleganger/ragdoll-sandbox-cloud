@@ -277,7 +277,8 @@ pub fn spawn_ragdoll(commands: &mut Commands, position: Vec3, yaw: f32) -> Entit
                 // weighs a realistic ~82 kg regardless of shape sizes.
                 ColliderMassProperties::Mass(def.mass),
                 layers::ragdoll(),
-                Friction::coefficient(0.8),
+                // Shoe soles grip; clothes slide a little.
+                Friction::coefficient(if matches!(def.part, BodyPart::FootL | BodyPart::FootR) { 1.5 } else { 0.8 }),
                 Restitution::coefficient(0.0),
                 // A little air resistance on spinning, so a limp body settles.
                 Damping { linear_damping: 0.05, angular_damping: 0.5 },

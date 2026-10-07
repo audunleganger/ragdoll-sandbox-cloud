@@ -47,13 +47,17 @@ pub struct BalanceTuning {
     /// as hard as body weight × distance to the toe (or heel) allows; more than
     /// that and the foot rolls onto its edge instead of pushing the body back.
     pub max_ankle_correction: f32,
+    /// Constant ankle angle (rad) added while standing. Negative = lean
+    /// slightly forward, which puts the weight over the middle of the feet
+    /// instead of near the heels, leaving room to sway both ways.
+    pub lean: f32,
 }
 
 impl Default for BalanceTuning {
     fn default() -> Self {
         // Picked by sweeping values in the `print_tuning_sweep` test. Gentle
         // gains do best: pushing harder only rolls the feet onto their edges.
-        BalanceTuning { ankle_gain_forward: 1.0, ankle_gain_sideways: 1.0, hip_gain: 1.5, max_ankle_correction: 0.2 }
+        BalanceTuning { ankle_gain_forward: 1.0, ankle_gain_sideways: 1.0, hip_gain: 1.5, max_ankle_correction: 0.2, lean: -0.02 }
     }
 }
 
@@ -242,7 +246,7 @@ fn think(
                 let mut angles = standing_pose(part.part);
                 match part.part {
                     BodyPart::FootL | BodyPart::FootR => {
-                        angles.x += ankle_pitch;
+                        angles.x += ankle_pitch + tuning.lean;
                         angles.z -= ankle_roll;
                     }
                     BodyPart::ThighL | BodyPart::ThighR => angles.x += hip_pitch,

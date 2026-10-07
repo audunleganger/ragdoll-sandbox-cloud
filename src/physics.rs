@@ -74,6 +74,10 @@ fn configure_solver(mut sims: Query<&mut RapierContextSimulation, Added<RapierCo
         params.contact_softness.damping_ratio = 10.0;
         params.static_contact_softness.natural_frequency = 120.0;
         params.static_contact_softness.damping_ratio = 10.0;
+        // Let friction act during the solver's position-correction pass too.
+        // Without it, the slight forward lean of a standing person made the
+        // feet creep across the floor at ~3 mm/s, like a slow moonwalk.
+        params.friction_in_bias_pass = true;
     }
 }
 

@@ -3,7 +3,31 @@
 Newest first. Each entry says what was built, how it was checked, and what
 you should look at when you run it.
 
-## Stage 3a: balance and fall reactions ✅ (tuning in progress, see below)
+## Stage 3a tuning: pistol, lean, foot creep ✅
+
+**What was wrong:** in the game a single pistol shot still knocked the person
+over. Tests replaying the exact logged shot showed why. Shooting someone from
+the front pushes them *backward*, and the backward margin was the smallest:
+the heel is only 8 cm behind the ankle, versus 16 cm to the toes. The pistol was
+also tuned against a test shove that didn't include the spin from an
+off-centre hit.
+
+**Fixes**
+- Standing pose leans ~1° forward (weight over mid-foot, like real people),
+  so the shove limit is ~20–25 N·s in every direction instead of 30/20.
+- Pistol 16 N·s (rocks them; quick follow-up shots drop them), shotgun
+  9 × 10 N·s (drops them).
+- The bullet-hit maths (push + spin) is now one shared function (`apply_hit`)
+  used by both the gun and the tests.
+- Feet were slowly sliding (~3 mm/s) under the lean. Fixed with a Rapier
+  solver option (`friction_in_bias_pass`): 34 mm → 0 mm creep in 10 s.
+
+**New tests:** one pistol shot (centre, left or right of the chest, fired
+from the game's camera position) leaves them standing; a point-blank shotgun
+blast drops them. Low controller rates (60/30/15 Hz) were also checked:
+a 20 N·s backward shove holds at all of them.
+
+## Stage 3a: balance and fall reactions ✅
 
 **Built**
 - `balance.rs`: the "brain". Each frame it measures the centre of mass and

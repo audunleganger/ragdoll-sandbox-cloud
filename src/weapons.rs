@@ -29,6 +29,9 @@ pub struct Arsenal {
     cooldown: f32,
 }
 
+/// Impulse of one pistol round (N·s). Public so the tests use the real value.
+pub const PISTOL_IMPULSE: f32 = 16.0;
+
 struct WeaponStats {
     /// Impulse per ray, in N·s. Real bullets carry only ~5 N·s; games
     /// exaggerate so hits are visible, and so do we.
@@ -44,9 +47,11 @@ struct WeaponStats {
 fn stats(weapon: Weapon) -> WeaponStats {
     match weapon {
         // Tuned so one pistol shot rocks a standing person without dropping
-        // them (they can take about 25-30 N·s on their ankles; see PROGRESS.md).
-        Weapon::Pistol => WeaponStats { impulse: 22.0, pellets: 1, spread: 0.0, cooldown: 0.2 },
-        Weapon::Shotgun => WeaponStats { impulse: 14.0, pellets: 9, spread: 0.06, cooldown: 0.8 },
+        // them: they can take about 25 N·s at the chest on their ankles, less
+        // for off-centre hits that also twist them (see PROGRESS.md).
+        // A few quick shots add up and knock them down.
+        Weapon::Pistol => WeaponStats { impulse: PISTOL_IMPULSE, pellets: 1, spread: 0.0, cooldown: 0.2 },
+        Weapon::Shotgun => WeaponStats { impulse: 10.0, pellets: 9, spread: 0.06, cooldown: 0.8 },
     }
 }
 
@@ -121,15 +126,21 @@ fn shoot(
         let name = names.get(entity).map(|n| n.as_str()).unwrap_or("?");
         debug!("{:?} hit {name} at {point:.2}", arsenal.current);
 
-        // Hit something movable? Kick it at the hit point. The spin part
-        // (torque impulse) is lever arm × impulse, measured from the body's
-        // centre of mass. Our shapes are centred, so that's the body's origin.
         if let Ok((body, mut impulse)) = bodies.get_mut(entity) {
-            let kick = dir * weapon.impulse;
-            impulse.impulse += kick;
-            impulse.torque_impulse += (point - body.translation()).cross(kick);
+            apply_hit(&mut impulse, body.translation(), point, dir * weapon.impulse);
         }
     }
+}
+
+/// Kick a body with `kick` (N·s) at world position `point`.
+///
+/// Besides pushing the body, a hit away from its centre of mass makes it
+/// spin: the spin (torque impulse) is lever arm × impulse. Our shapes are
+/// centred on their origin, so `center` (the body's position) is the centre
+/// of mass.
+pub fn apply_hit(impulse: &mut ExternalImpulse, center: Vec3, point: Vec3, kick: Vec3) {
+    impulse.impulse += kick;
+    impulse.torque_impulse += (point - center).cross(kick);
 }
 
 /// E = explosion where the crosshair points.
