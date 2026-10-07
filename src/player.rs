@@ -17,6 +17,7 @@ use crate::muscles::MuscleTone;
 use crate::physics::SlowMotion;
 use crate::ragdoll::{RagdollPart, SpawnRagdoll};
 use crate::shape::{Paint, Shape};
+use crate::visuals::{SmoothingSet, VisualStandIn};
 
 const WALK_SPEED: f32 = 4.0;
 const SPRINT_SPEED: f32 = 8.0;
@@ -56,16 +57,27 @@ pub struct PlayerCamera {
 #[derive(Resource, Default)]
 pub struct MouseCaptured(pub bool);
 
+/// Set when Space is pressed; used up by the next physics step. (Movement
+/// runs in the fixed physics schedule, which may run zero or several times
+/// per frame, so it could miss or double-count a "just pressed" key.)
+#[derive(Resource, Default)]
+struct JumpRequested(bool);
+
 pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MouseCaptured>()
+            .init_resource::<JumpRequested>()
             .add_systems(Startup, spawn_player)
+            .add_systems(Update, (capture_mouse, look, request_jump, sandbox_keys))
+            // Movement and barging happen in step with physics.
             .add_systems(
-                Update,
-                (capture_mouse, look, move_player, follow_camera, barge, sandbox_keys).chain(),
-            );
+                FixedUpdate,
+                (move_player.before(PhysicsSet::SyncBackend), barge.after(PhysicsSet::Writeback)),
+            )
+            // The camera follows the player's smoothed position (`visuals.rs`).
+            .add_systems(PostUpdate, follow_camera.after(SmoothingSet).before(TransformSystems::Propagate));
     }
 }
 
@@ -137,9 +149,16 @@ fn look(motion: Res<AccumulatedMouseMotion>, captured: Res<MouseCaptured>, mut c
     camera.pitch = (camera.pitch - motion.delta.y * MOUSE_SENSITIVITY).clamp(-1.4, 1.2);
 }
 
+fn request_jump(keys: Res<ButtonInput<KeyCode>>, mut jump: ResMut<JumpRequested>) {
+    if keys.just_pressed(KeyCode::Space) {
+        jump.0 = true;
+    }
+}
+
 fn move_player(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
+    mut jump: ResMut<JumpRequested>,
     camera: Single<&PlayerCamera>,
     player: Single<(
         &mut Player,
@@ -167,7 +186,7 @@ fn move_player(
     // Gravity and jumping act on the vertical speed only.
     let mut vertical = player.velocity.y;
     if grounded {
-        vertical = if keys.just_pressed(KeyCode::Space) { JUMP_SPEED } else { 0.0 };
+        vertical = if std::mem::take(&mut jump.0) { JUMP_SPEED } else { 0.0 };
     } else {
         vertical -= GRAVITY * dt;
     }
@@ -183,13 +202,22 @@ fn move_player(
 }
 
 fn follow_camera(
-    player: Single<&Transform, (With<Player>, Without<PlayerCamera>)>,
+    player: Single<(Entity, &Transform), (With<Player>, Without<PlayerCamera>)>,
+    stand_ins: Query<(&VisualStandIn, &Transform), (Without<Player>, Without<PlayerCamera>)>,
     camera: Single<(&PlayerCamera, &mut Transform)>,
     rapier: ReadRapierContext,
 ) {
     let (cam, mut cam_transform) = camera.into_inner();
     let rotation = Quat::from_euler(EulerRot::YXZ, cam.yaw, cam.pitch, 0.0);
-    let pivot = player.translation + Vec3::Y * CAMERA_HEIGHT;
+    // Follow where the player is *drawn* (smoothed), not where physics last
+    // put them, or the camera would stutter.
+    let (player_entity, player_transform) = *player;
+    let drawn = stand_ins
+        .iter()
+        .find(|(s, _)| s.target == player_entity)
+        .map(|(_, t)| t.translation)
+        .unwrap_or(player_transform.translation);
+    let pivot = drawn + Vec3::Y * CAMERA_HEIGHT;
     let wanted = pivot + rotation * Vec3::new(CAMERA_SHOULDER, 0.0, CAMERA_DISTANCE);
 
     // Don't let walls get between the camera and the player: if one does,

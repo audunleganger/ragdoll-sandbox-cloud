@@ -287,8 +287,6 @@ pub fn spawn_ragdoll(commands: &mut Commands, position: Vec3, yaw: f32) -> Entit
                 // Rapier normally "puts to sleep" bodies that stop moving, to
                 // save work. Muscles change from frame to frame, so stay awake.
                 Sleeping::disabled(),
-                // Smooth rendering between physics steps (see `physics.rs`).
-                TransformInterpolation::default(),
                 ),
             ))
             .id();

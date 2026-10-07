@@ -6,6 +6,14 @@
 and 3b (stepping). Snapshots of each stage are branches: `stage-1`, `stage-2`,
 `stage-3a`, `stage-3b`.
 
+**Last change of the night (please check):** physics, muscles and balance now
+run in a fixed 120 Hz loop, and rendering smooths motion between physics steps
+itself (`visuals.rs`). This made the person's behaviour independent of your
+frame rate (tested from 20 to 144 fps). I could only check rendering on a slow
+virtual screen. **If motion looks jittery or stuttery**, compare with branch
+`pre-fixed-update` (`git checkout pre-fixed-update`), which is the version just
+before this change, and tell me.
+
 **To try it** (see `README.md` for the Arch install steps):
 
 ```sh
@@ -31,9 +39,9 @@ RUST_LOG=ragdoll_sandbox=debug cargo run   # also logs every hit and barge
 too weak, odd poses. Every number is a named constant near the top of its file.
 
 **Known limits**
-- Below ~60 fps the balance controller updates less often and the hardest
-  shoves get through (it still stands and takes ~20 N·s). Details below in
-  "Real game timing".
+- The hardest shoves they catch: ~25–30 N·s forward, 30–35 back, 35–40
+  sideways (a single pistol shot is 16 N·s). 30 N·s forward is right at the
+  edge, so it sometimes holds and sometimes doesn't.
 - On **stairs** shoves usually end in a fall; standing **across** the ramp's
   slope doesn't work (up/down the ramp does). Details below in "Terrain".
 - Getting back up, walking on their own, and shot reactions per body part
@@ -45,6 +53,30 @@ too weak, odd poses. Every number is a named constant near the top of its file.
 
 Newest first. Each entry says what was built, how it was checked, and what
 you should look at when you run it.
+
+## Physics, muscles and balance in a fixed 120 Hz loop ✅
+
+**Why:** the balance controller ran once per *rendered frame*. Below ~60 fps it
+only updated every 2–4 physics steps and shoves it would normally catch got
+through (see "Real game timing" below).
+
+**Change:** everything physical (Rapier, muscles, balance, player movement)
+now runs in Bevy's `FixedUpdate` schedule at exactly 120 Hz, which Bevy runs 0,
+1 or several times per frame as needed. The controller now acts before every
+physics step at any frame rate. Rendering does its own smoothing: each moving
+object is drawn by a separate "visual stand-in" that blends between the last
+two physics poses (`visuals.rs`). The camera follows the player's stand-in.
+
+**Measured** (game timing, 20–144 fps): 20, 25 and 30 N·s forward shoves were
+all caught at every frame rate tested.
+
+**Honest note on limits:** while re-checking I found 30 N·s forward is right on
+the controller's edge: depending on tiny details (how long they stood
+before, the exact frame rate) it holds or not. Shove tests now use 25 N·s,
+which is reliably caught in every direction; the stagger test uses 30 N·s
+sideways (ankles alone manage ~20 there, stepping ~35). Shove tests also let a
+freshly spawned person settle for 2 s first: right after spawning (straight
+arms, no lean yet) they're a little easier to knock over.
 
 ## Shoulder-barge checked and tuned ✅
 

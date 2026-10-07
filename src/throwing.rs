@@ -119,7 +119,6 @@ fn charge_and_throw(
         // steps; continuous collision detection (CCD) prevents that.
         Ccd::enabled(),
         ExternalImpulse::default(),
-        TransformInterpolation::default(),
     ));
 }
 

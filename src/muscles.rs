@@ -123,10 +123,11 @@ pub struct MusclesPlugin;
 
 impl Plugin for MusclesPlugin {
     fn build(&self, app: &mut App) {
-        // Run just before physics, after anything that changes targets or tone.
+        // Run right before every physics step, after anything that changes
+        // targets or tone.
         app.init_resource::<MuscleTone>()
             .init_resource::<ToneScale>()
-            .add_systems(PostUpdate, drive_muscles.in_set(MuscleSet).before(PhysicsSet::SyncBackend));
+            .add_systems(FixedUpdate, drive_muscles.in_set(MuscleSet).before(PhysicsSet::SyncBackend));
     }
 }
 

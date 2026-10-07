@@ -39,8 +39,11 @@ objects and body parts are **dynamic** (moved by physics). The player is
 
 **Fixed time step** (`physics.rs`): physics always advances in steps of exactly
 1/120 s, each split into 4 substeps (so 1/480 s slices), no matter how fast your
-monitor refreshes. Rendering *interpolates* between the last two physics states
-so motion still looks smooth. Why it matters: many details (how stiff contacts
+monitor refreshes. It runs in Bevy's `FixedUpdate` schedule, together with the
+muscles and the balance "brain", so they react before every single step.
+Rendering *interpolates* between the last two physics states so motion still
+looks smooth (`visuals.rs`: moving objects are drawn by "stand-in" entities
+that blend between where physics put them on the last two steps). Why it matters: many details (how stiff contacts
 are, how muscles respond) depend on the step size. With steps that followed the
 frame rate, the person stood fine at 60 Hz but toppled at 144 Hz. Now the game
 and the tests run identical physics.
@@ -162,8 +165,9 @@ upright *in the world* (a trick from SIMBICON, a well-known walking controller).
 person **braces**: arms thrown toward the fall, chin tucked, knees soft. After
 landing, muscle tone fades to ~12% over 1.5 s: lying there, not a noodle.
 
-**How strong a shove can they take?** About 30–35 N·s at the chest (like a
-30 kg crate hitting at 1 m/s). Ankles alone managed 20–25.
+**How strong a shove can they take?** About 25–30 N·s forward, 30–35 back
+and 35–40 sideways, at the chest (30 N·s is like a 30 kg crate hitting at
+1 m/s). Ankles alone managed 20–25.
 
 ## 6. Shooting (`weapons.rs`)
 

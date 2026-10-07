@@ -25,7 +25,8 @@ pub struct CorePlugin;
 impl Plugin for CorePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            bevy_rapier3d::prelude::RapierPhysicsPlugin::<bevy_rapier3d::prelude::NoUserData>::default(),
+            // Physics runs in Bevy's fixed-rate schedule (see `physics.rs`).
+            bevy_rapier3d::prelude::RapierPhysicsPlugin::<bevy_rapier3d::prelude::NoUserData>::default().in_fixed_schedule(),
             physics::PhysicsSettingsPlugin,
             world::WorldPlugin,
             ragdoll::RagdollPlugin,

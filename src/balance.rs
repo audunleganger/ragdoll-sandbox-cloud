@@ -63,6 +63,10 @@ pub struct BalanceTuning {
     /// front-to-back and sideways (rad of hip correction per rad of tilt).
     pub pelvis_pitch_gain: f32,
     pub pelvis_roll_gain: f32,
+    /// Land this far (m) past the capture point, so it ends up between the feet.
+    pub step_overshoot: f32,
+    /// How far (m) to the side of the capture point each foot lands.
+    pub step_width: f32,
 }
 
 impl Default for BalanceTuning {
@@ -82,6 +86,8 @@ impl Default for BalanceTuning {
             // Negative: the sweep showed the positive sign halves how hard a
             // sideways shove they can take.
             pelvis_roll_gain: -1.0,
+            step_overshoot: 0.06,
+            step_width: 0.09,
         }
     }
 }
@@ -101,8 +107,6 @@ const STEP_THRESHOLD: f32 = 0.11;
 const MAX_STEP: f32 = 0.55;
 /// How high the foot lifts mid-swing (m).
 const STEP_HEIGHT: f32 = 0.07;
-/// Land this far past the capture point, so it ends up between the feet.
-const STEP_OVERSHOOT: f32 = 0.06;
 /// Give up after this many steps in a row (a stagger that never ends).
 const MAX_STEPS: u32 = 6;
 /// Muscles always trail their target a little, so the swinging foot aims
@@ -214,8 +218,9 @@ pub struct BalancePlugin;
 
 impl Plugin for BalancePlugin {
     fn build(&self, app: &mut App) {
+        // Once per physics step, before the muscles (see `physics.rs`).
         app.init_resource::<BalanceEnabled>().init_resource::<BalanceTuning>().add_systems(
-            PostUpdate,
+            FixedUpdate,
             (attach_balance, think)
                 .chain()
                 .before(crate::muscles::MuscleSet),
@@ -353,6 +358,7 @@ fn slope_compensation(normal: Vec3, body: &BodyState) -> Vec3 {
 fn plan_step(
     body: &BodyState,
     rapier: &ReadRapierContext,
+    tuning: &BalanceTuning,
     capture_point: Vec3,
     last: Option<Side>,
 ) -> Option<(Side, Vec3, Vec3)> {
@@ -370,7 +376,7 @@ fn plan_step(
         Side::Left => body.foot_l,
         Side::Right => body.foot_r,
     };
-    let target = step_target(body, rapier, capture_point, side)?;
+    let target = step_target(body, rapier, tuning, capture_point, side)?;
     Some((side, swing, target))
 }
 
@@ -378,7 +384,13 @@ fn plan_step(
 /// capture point, on its own side of the body (so the capture point ends up
 /// between the two feet), never crossing the other leg. `None` if that's
 /// further than a step can reach.
-fn step_target(body: &BodyState, rapier: &ReadRapierContext, capture_point: Vec3, side: Side) -> Option<Vec3> {
+fn step_target(
+    body: &BodyState,
+    rapier: &ReadRapierContext,
+    tuning: &BalanceTuning,
+    capture_point: Vec3,
+    side: Side,
+) -> Option<Vec3> {
     let stance = match side {
         Side::Left => body.foot_r,
         Side::Right => body.foot_l,
@@ -386,7 +398,7 @@ fn step_target(body: &BodyState, rapier: &ReadRapierContext, capture_point: Vec3
     // Work on the horizontal plane at the standing foot's height.
     let cp = Vec3::new(capture_point.x, stance.y, capture_point.z);
     let error = (cp - body.support_center) * Vec3::new(1.0, 0.0, 1.0);
-    let mut target = cp + error.normalize_or_zero() * STEP_OVERSHOOT + body.left * side.sign() * 0.09;
+    let mut target = cp + error.normalize_or_zero() * tuning.step_overshoot + body.left * side.sign() * tuning.step_width;
     let across = (target - stance).dot(body.left) * side.sign();
     if across < 0.14 {
         target += body.left * side.sign() * (0.14 - across);
@@ -422,7 +434,7 @@ fn leg_ik(pelvis: &Transform, side: Side, ankle_world: Vec3) -> (Vec3, Vec3, Vec
     (hip_angles, knee_angles, ankle_angles)
 }
 
-/// The balance "brain": runs every frame, before the muscles.
+/// The balance "brain": runs before every physics step, before the muscles.
 fn think(
     time: Res<Time>,
     enabled: Res<BalanceEnabled>,
@@ -470,7 +482,7 @@ fn think(
             } else if balance.steps >= MAX_STEPS {
                 Some(falling)
             } else {
-                match plan_step(&body, &rapier, capture_point, balance.last_step) {
+                match plan_step(&body, &rapier, &tuning, capture_point, balance.last_step) {
                     Some((side, from, to)) => Some(BalanceState::Stepping { side, from, to }),
                     None => Some(falling),
                 }
@@ -536,7 +548,7 @@ fn think(
             // Keep aiming at where the capture point is *now*: people adjust
             // their step mid-swing. (If it's out of reach, keep the old target;
             // the fall check will take over.)
-            if let Some(new_to) = step_target(&body, &rapier, capture_point, side) {
+            if let Some(new_to) = step_target(&body, &rapier, &tuning, capture_point, side) {
                 to = new_to;
                 balance.state = BalanceState::Stepping { side, from, to };
             }

@@ -9,10 +9,15 @@
 //! simulate a *different person*: one might stand while the other topples.
 //!
 //! So physics always advances in steps of exactly `PHYSICS_DT`, each split
-//! into `SUBSTEPS` smaller steps, however fast the screen refreshes. Rendering
-//! then *interpolates* (blends) between the last two physics states so motion
-//! looks smooth at any frame rate. The headless tests use exactly these values
-//! too, so they test the same physics you see.
+//! into `SUBSTEPS` smaller steps, however fast the screen refreshes. It runs
+//! in Bevy's `FixedUpdate` schedule, which Bevy runs as many times per frame
+//! as needed to keep up with the clock (0, 1 or several). The muscles and the
+//! balance controller run in the same schedule, right before each physics
+//! step, so they react to every single step whatever the frame rate.
+//!
+//! Rendering then *interpolates* (blends) between the last two physics states
+//! so motion looks smooth at any frame rate (`visuals.rs`). The headless tests
+//! use exactly these values too, so they test the same physics you see.
 
 use std::time::Duration;
 
@@ -22,6 +27,11 @@ use bevy_rapier3d::prelude::*;
 /// Physics steps per second.
 pub const PHYSICS_HZ: f32 = 120.0;
 pub const PHYSICS_DT: f32 = 1.0 / PHYSICS_HZ;
+
+/// One physics step as a `Duration` (what Bevy's clocks use).
+pub fn physics_step() -> Duration {
+    Duration::from_secs_f64(1.0 / PHYSICS_HZ as f64)
+}
 
 /// Each physics step is split into this many substeps, so the solver works in
 /// 1/480 s slices. The body is a chain of 14 parts held together by joints and
@@ -36,9 +46,10 @@ pub const SLOW_MOTION_SCALE: f32 = 0.2;
 #[derive(Resource, Default)]
 pub struct SlowMotion(pub bool);
 
-/// The time-step mode the game uses. Tests use `Fixed` with the same values.
+/// Rapier's time-step setting: every run of the fixed schedule advances
+/// physics by exactly one step.
 pub fn game_timestep() -> TimestepMode {
-    TimestepMode::Interpolated { dt: PHYSICS_DT, time_scale: 1.0, substeps: SUBSTEPS }
+    TimestepMode::Fixed { dt: PHYSICS_DT, substeps: SUBSTEPS }
 }
 
 pub struct PhysicsSettingsPlugin;
@@ -47,6 +58,7 @@ impl Plugin for PhysicsSettingsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SlowMotion>()
             .insert_resource(game_timestep())
+            .insert_resource(Time::<Fixed>::from_duration(physics_step()))
             .add_systems(Startup, cap_frame_time)
             .add_systems(Update, (configure_solver, apply_slow_motion));
     }
@@ -54,7 +66,8 @@ impl Plugin for PhysicsSettingsPlugin {
 
 /// If a frame takes very long (window dragged, PC busy), don't try to catch up
 /// on all the missed physics at once: that can snowball into an ever-slower
-/// game. Instead, the game briefly runs in slow motion.
+/// game. Instead, the game briefly runs in slow motion. (At most 100 ms of
+/// game time per frame = at most 12 physics steps.)
 fn cap_frame_time(mut time: ResMut<Time<Virtual>>) {
     time.set_max_delta(Duration::from_millis(100));
 }
