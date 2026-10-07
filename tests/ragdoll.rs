@@ -961,3 +961,23 @@ fn print_ramp_25() {
         }
     }
 }
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_flat_shove_end_state() {
+    use ragdoll_sandbox::balance::Balance;
+    for j in [25.0, 30.0] {
+        let mut app = active();
+        settle(&mut app);
+        let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+        let (chest, _, _) = part(&mut app, BodyPart::Chest);
+        app.world_mut().get_mut::<ExternalImpulse>(chest).unwrap().impulse = pelvis.rotation * Vec3::Z * j;
+        run_seconds(&mut app, 8.0);
+        let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+        let kl = joint_angle(&mut app, BodyPart::ThighL, BodyPart::ShinL, 0);
+        let kr = joint_angle(&mut app, BodyPart::ThighR, BodyPart::ShinR, 0);
+        let mut q = app.world_mut().query::<&Balance>();
+        let b = q.single(app.world()).unwrap();
+        println!("{j} N·s fwd after 8 s: {:?} pelvis y={:.3} knees {kl:.2}/{kr:.2} COM speed {:.3}", b.state, pelvis.translation.y, b.com_velocity.length());
+    }
+}

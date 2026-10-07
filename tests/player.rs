@@ -80,3 +80,24 @@ fn w_walks_the_player_forward() {
     assert!((moved.length() - 2.0).abs() < 0.3, "walked {:.2} m in 0.5 s", moved.length());
     assert!(moved.z > 1.5, "walked the wrong way: {moved:?}");
 }
+
+#[test]
+fn space_in_mid_air_does_not_jump_again_on_landing() {
+    let mut app = app();
+    steps(&mut app, 120);
+    let ground = player_y(&mut app);
+    key(&mut app, KeyCode::Space, true);
+    app.update();
+    key(&mut app, KeyCode::Space, false);
+    steps(&mut app, 40); // well into the jump
+    key(&mut app, KeyCode::Space, true);
+    app.update();
+    key(&mut app, KeyCode::Space, false);
+    steps(&mut app, 140); // land (the jump lasts ~1 s)
+    let mut highest_after_landing = f32::MIN;
+    for _ in 0..60 {
+        app.update();
+        highest_after_landing = highest_after_landing.max(player_y(&mut app));
+    }
+    assert!(highest_after_landing - ground < 0.05, "jumped again after landing ({:.2} m up)", highest_after_landing - ground);
+}

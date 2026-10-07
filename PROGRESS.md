@@ -6,7 +6,7 @@
 and 3b (stepping). Snapshots of each stage are branches: `stage-1`, `stage-2`,
 `stage-3a`, `stage-3b`.
 
-**Last change of the night (please check):** physics, muscles and balance now
+**Biggest change to check:** physics, muscles and balance now
 run in a fixed 120 Hz loop, and rendering smooths motion between physics steps
 itself (`visuals.rs`). This made the person's behaviour independent of your
 frame rate (tested from 20 to 144 fps). I could only check rendering on a slow
@@ -19,11 +19,14 @@ before this change, and tell me.
 ```sh
 git pull
 cargo run                      # first build takes 5–15 minutes
-cargo test                     # 23 headless tests (body + player), ~25 s
+cargo test                     # 24 headless tests (body + player), ~25 s
 RUST_LOG=ragdoll_sandbox=debug cargo run   # also logs every hit and barge
 ```
 
 **What to look at, in this order**
+0. **Smoothness.** Does motion look smooth, including in slow motion (T)?
+   That's the new rendering path I couldn't watch at normal speed. Also
+   **jump** (Space): it never worked before tonight; now it should.
 1. **It stands.** Walk up (WASD) and look. Slight forward lean, arms relaxed.
 2. **One pistol shot** (left mouse) to the chest: they rock, maybe take a step,
    and stay up. Then **two or three quick shots**: a stagger of a few

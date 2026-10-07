@@ -202,6 +202,9 @@ fn move_player(
         }
     } else {
         vertical -= GRAVITY * dt;
+        // Space pressed in mid-air does nothing (rather than jumping again
+        // the moment you land).
+        jump.0 = false;
     }
 
     player.velocity = Vec3::new(horizontal.x, vertical, horizontal.z);
