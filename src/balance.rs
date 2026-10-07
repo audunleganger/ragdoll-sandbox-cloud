@@ -2,7 +2,8 @@
 //! should pull.
 //!
 //! `muscles.rs` holds whatever pose it's given. This file chooses that pose
-//! every frame, based on what the body is doing:
+//! before every physics step (120 times a second), based on what the body is
+//! doing:
 //!
 //! 1. **Sense** the centre of mass (COM) and how fast it moves.
 //! 2. **Predict** where it's heading: the *capture point*.
@@ -263,10 +264,10 @@ struct BodyState {
     lowest_y: f32,
 }
 
-/// A body part's true physics state. In the game, `Transform` is *smoothed*
-/// for display (blended between the last two physics steps), so it lags
-/// slightly behind; balancing on lagging information is measurably worse.
-/// So read position, rotation and velocity straight from the physics engine.
+/// A body part's physics state, read straight from the physics engine.
+/// (Since physics moved into the fixed schedule, `Transform` holds the same
+/// values, so this is a safety net: the controller never balances on
+/// display-smoothed positions, which lag behind and measurably hurt balance.)
 fn true_state(
     rapier: &ReadRapierContext,
     handle: Option<&RapierRigidBodyHandle>,

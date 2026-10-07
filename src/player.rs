@@ -44,7 +44,14 @@ pub struct Player {
     /// Current velocity. We track it ourselves since kinematic bodies have none.
     pub velocity: Vec3,
     barge_cooldown: f32,
+    /// Seconds since jumping during which "on the ground" is ignored: right
+    /// after takeoff the controller still reports the ground it just left.
+    takeoff: f32,
 }
+
+/// How far down the controller snaps the player onto the ground while
+/// walking (so they stick to slopes and stairs instead of hopping off).
+const SNAP_TO_GROUND: f32 = 0.3;
 
 /// The camera. Yaw = looking left/right, pitch = looking up/down (radians).
 #[derive(Component, Default)]
@@ -112,7 +119,7 @@ fn spawn_player(mut commands: Commands) {
                 min_width: CharacterLength::Absolute(0.2),
                 include_dynamic_bodies: false,
             }),
-            snap_to_ground: Some(CharacterLength::Absolute(0.3)),
+            snap_to_ground: Some(CharacterLength::Absolute(SNAP_TO_GROUND)),
             // We shove the person ourselves (see `barge`), more controllably.
             apply_impulse_to_dynamic_bodies: false,
             ..default()
@@ -169,7 +176,8 @@ fn move_player(
 ) {
     let (mut player, mut transform, mut controller, output) = player.into_inner();
     let dt = time.delta_secs();
-    let grounded = output.map(|o| o.grounded).unwrap_or(false);
+    player.takeoff = (player.takeoff - dt).max(0.0);
+    let grounded = player.takeoff == 0.0 && output.map(|o| o.grounded).unwrap_or(false);
 
     // WASD relative to where the camera looks, flattened onto the ground.
     let facing = Quat::from_rotation_y(camera.yaw);
@@ -187,12 +195,18 @@ fn move_player(
     let mut vertical = player.velocity.y;
     if grounded {
         vertical = if std::mem::take(&mut jump.0) { JUMP_SPEED } else { 0.0 };
+        if vertical > 0.0 {
+            player.takeoff = 0.2;
+            debug!("Jump");
+        }
     } else {
         vertical -= GRAVITY * dt;
     }
 
     player.velocity = Vec3::new(horizontal.x, vertical, horizontal.z);
     controller.translation = Some(player.velocity * dt);
+    // Snapping to the ground while going up would cancel the jump.
+    controller.snap_to_ground = (vertical <= 0.0).then_some(CharacterLength::Absolute(SNAP_TO_GROUND));
 
     // Turn the body toward the direction of travel.
     if horizontal.length_squared() > 0.01 {

@@ -383,6 +383,27 @@ fn with_the_games_own_timing_they_stand_and_catch_a_stagger() {
     }
 }
 
+#[derive(Resource, Default)]
+struct StepCounter(u32);
+
+#[test]
+fn slow_motion_slows_physics_to_a_fifth() {
+    use ragdoll_sandbox::physics::{SLOW_MOTION_SCALE, SlowMotion};
+    let mut app = active();
+    app.init_resource::<StepCounter>();
+    app.add_systems(FixedUpdate, |mut steps: ResMut<StepCounter>| steps.0 += 1);
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(1.0 / 60.0)));
+    app.insert_resource(SlowMotion(true));
+    app.update(); // slow motion takes effect from here on
+    app.world_mut().resource_mut::<StepCounter>().0 = 0;
+    for _ in 0..60 {
+        app.update(); // one real second at 60 fps
+    }
+    let steps = app.world().resource::<StepCounter>().0;
+    let expected = (ragdoll_sandbox::physics::PHYSICS_HZ * SLOW_MOTION_SCALE).round() as u32;
+    assert!(steps.abs_diff(expected) <= 1, "{steps} physics steps in one real second of slow motion, expected ~{expected}");
+}
+
 // ---------------------------------------------------------------------------
 // Diagnostics
 // ---------------------------------------------------------------------------

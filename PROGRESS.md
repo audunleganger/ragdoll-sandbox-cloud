@@ -19,7 +19,7 @@ before this change, and tell me.
 ```sh
 git pull
 cargo run                      # first build takes 5–15 minutes
-cargo test                     # 20 headless physics tests, ~20 s
+cargo test                     # 22 headless tests (body + player), ~25 s
 RUST_LOG=ragdoll_sandbox=debug cargo run   # also logs every hit and barge
 ```
 
@@ -54,6 +54,20 @@ too weak, odd poses. Every number is a named constant near the top of its file.
 Newest first. Each entry says what was built, how it was checked, and what
 you should look at when you run it.
 
+## Re-checked every interaction after the 120 Hz change ✅ (found a jump bug)
+
+- **Jump never worked**, since Stage 1: pressing Space moved the player up
+  4 cm. Right after takeoff the character controller still reported "on the
+  ground" and "snap to ground" pulled the player back down. Fixed (no snapping
+  while going up, and "on the ground" is ignored for 0.2 s after takeoff), and
+  now there's a test: the jump reaches > 0.8 m and lands again.
+- New headless player tests (`tests/player.rs`) drive the real player code
+  with simulated key presses: walking speed and direction, jumping.
+- New test: slow motion runs exactly 24 physics steps per real second (0.2×).
+- Checked in the game: walking barge 11 N·s, sprint barge 45 N·s, crate throw
+  (draws and knocks them over), explosion in slow motion, reset. No cursor
+  errors in the log.
+
 ## Physics, muscles and balance in a fixed 120 Hz loop ✅
 
 **Why:** the balance controller ran once per *rendered frame*. Below ~60 fps it
@@ -87,6 +101,9 @@ speed squared: **walking** (4 m/s) = 11 N·s, and six bumps in a row left them
 standing; **sprinting** (8 m/s) = 45 N·s, and they went down.
 
 ## Real game timing ✅ (with a frame-rate caveat)
+
+*(Superseded: the frame-rate caveat below was fixed by the "fixed 120 Hz loop"
+change above.)*
 
 All earlier tests advanced physics one fixed step at a time. The game itself
 steps physics whenever enough real time has passed and *smooths* positions
