@@ -1,5 +1,48 @@
 # Progress log
 
+## Start here (summary of the overnight session)
+
+**Everything from the plan is built, tested and on `main`:** Stages 1, 2, 3a
+and 3b (stepping). Snapshots of each stage are branches: `stage-1`, `stage-2`,
+`stage-3a`, `stage-3b`.
+
+**To try it** (see `README.md` for the Arch install steps):
+
+```sh
+git pull
+cargo run                      # first build takes 5–15 minutes
+cargo test                     # 20 headless physics tests, ~20 s
+RUST_LOG=ragdoll_sandbox=debug cargo run   # also logs every hit and barge
+```
+
+**What to look at, in this order**
+1. **It stands.** Walk up (WASD) and look. Slight forward lean, arms relaxed.
+2. **One pistol shot** (left mouse) to the chest: they rock, maybe take a step,
+   and stay up. Then **two or three quick shots**: a stagger of a few
+   steps with arms flung out, then a fall with an arm reaching to catch themselves.
+3. **Shotgun** (2): knocked flat, then relaxing on the ground. **R** resets.
+4. **Walk** into them (gentle nudge), then **sprint** into them (Shift; they go down).
+5. **Throw** a crate (Q, hold right mouse, release).
+6. **F** spawns them in front of you. Do it on the **platform** (via the stairs)
+   and push them off the edge; they fall instead of stepping into thin air.
+7. **T** slow motion, to watch any of the above. **G** limp, **−/=** muscle tone.
+
+**Please tell me** what looks wrong or unnatural: stiff, floppy, too strong,
+too weak, odd poses. Every number is a named constant near the top of its file.
+
+**Known limits**
+- Below ~60 fps the balance controller updates less often and the hardest
+  shoves get through (it still stands and takes ~20 N·s). Details below in
+  "Real game timing".
+- On **stairs** shoves usually end in a fall; standing **across** the ramp's
+  slope doesn't work (up/down the ramp does). Details below in "Terrain".
+- Getting back up, walking on their own, and shot reactions per body part
+  (e.g. clutching a wounded arm) are not built.
+- My visual checks ran on a virtual screen with software rendering at a few
+  frames per second, so I've only seen rough snapshots, never smooth motion.
+
+---
+
 Newest first. Each entry says what was built, how it was checked, and what
 you should look at when you run it.
 
