@@ -2,7 +2,7 @@
 //! that follows them.
 //!
 //! The player is *not* a ragdoll. It is a "kinematic character controller":
-//! each frame we tell Rapier where we'd like to move and Rapier slides us
+//! each physics step we tell Rapier where we'd like to move and Rapier slides us
 //! along walls, up steps and over slopes. Kinematic means forces don't push it
 //! around; it goes where we say unless something solid is in the way.
 
@@ -28,7 +28,8 @@ const MOUSE_SENSITIVITY: f32 = 0.0025;
 /// How hard running into the person shoves them. The shove grows with your
 /// speed *squared* (like the energy of a collision): walking (4 m/s) gives
 /// ~11 N·s, a nudge they can catch; sprinting (8 m/s) ~45 N·s, enough to
-/// make them stagger or fall. (They can take ~30 N·s; see PROGRESS.md.)
+/// make them stagger or fall. (They can take ~25–40 N·s depending on
+/// direction; see PROGRESS.md.)
 const BARGE_STRENGTH: f32 = 0.7;
 /// Seconds between shoves, so walking into someone isn't one shove per frame.
 const BARGE_COOLDOWN: f32 = 0.35;
@@ -44,8 +45,8 @@ pub struct Player {
     /// Current velocity. We track it ourselves since kinematic bodies have none.
     pub velocity: Vec3,
     barge_cooldown: f32,
-    /// Seconds since jumping during which "on the ground" is ignored: right
-    /// after takeoff the controller still reports the ground it just left.
+    /// Time left (s) during which "on the ground" is ignored after a jump:
+    /// right after takeoff the controller still reports the ground it left.
     takeoff: f32,
 }
 
