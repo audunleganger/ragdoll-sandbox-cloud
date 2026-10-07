@@ -169,6 +169,20 @@ landing, muscle tone fades to ~12% over 1.5 s: lying there, not a noodle.
 and 35–40 sideways, at the chest (30 N·s is like a 30 kg crate hitting at
 1 m/s). Ankles alone managed 20–25.
 
+**Uneven ground.** Heights are measured from the ground under the feet, not
+from "height 0", so all of the above works on the 3 m platform too. The
+controller looks down with **rays** (invisible lines that report where they hit
+something):
+
+- Before a step: how high is the ground where the foot will land? Small steps
+  up or down are fine; a drop of more than 45 cm (a ledge) can't be stepped
+  onto, so the person falls off instead.
+- While standing: which way does the ground under each foot face? On a slope,
+  the ankles tilt to keep the body upright. Standing *across* a slope, the
+  uphill foot is higher, so the uphill knee bends (the same two-segment leg
+  geometry as stepping, used to shorten the leg).
+- When spawning: under each heel and toe, so neither foot starts inside the ground.
+
 ## 6. Shooting (`weapons.rs`)
 
 Guns are **hitscan**: no bullet flies through the air. We cast an invisible ray
