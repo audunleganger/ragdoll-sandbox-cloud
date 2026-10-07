@@ -4,6 +4,7 @@
 //! headless tests, without a window) and the *game* parts that need a window,
 //! keyboard and mouse. `main.rs` puts them together.
 
+pub mod balance;
 pub mod hud;
 pub mod layers;
 pub mod muscles;
@@ -29,6 +30,7 @@ impl Plugin for CorePlugin {
             world::WorldPlugin,
             ragdoll::RagdollPlugin,
             muscles::MusclesPlugin,
+            balance::BalancePlugin,
         ));
     }
 }

@@ -83,6 +83,23 @@ impl Default for MuscleTone {
     }
 }
 
+/// A multiplier on muscle tone controlled by the balance "brain" (e.g. it
+/// relaxes the body after a fall). The tone the muscles actually use is
+/// `MuscleTone × ToneScale`, so your own tone setting still applies.
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct ToneScale(pub f32);
+
+impl Default for ToneScale {
+    fn default() -> Self {
+        ToneScale(1.0)
+    }
+}
+
+/// Systems that copy targets into the joint motors. Anything that changes
+/// targets or tone should run before this.
+#[derive(SystemSet, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct MuscleSet;
+
 /// The angle each joint's muscles are trying to reach, per axis (x, y, z) in
 /// radians. Lives on the part below the joint.
 #[derive(Component, Clone, Copy, Debug, Default)]
@@ -108,16 +125,18 @@ impl Plugin for MusclesPlugin {
     fn build(&self, app: &mut App) {
         // Run just before physics, after anything that changes targets or tone.
         app.init_resource::<MuscleTone>()
-            .add_systems(PostUpdate, drive_muscles.before(PhysicsSet::SyncBackend));
+            .init_resource::<ToneScale>()
+            .add_systems(PostUpdate, drive_muscles.in_set(MuscleSet).before(PhysicsSet::SyncBackend));
     }
 }
 
 /// Copy the current targets and tone into the joint motors.
 fn drive_muscles(
     tone: Res<MuscleTone>,
+    scale: Res<ToneScale>,
     mut joints: Query<(&RagdollPart, &RagdollJoint, &JointTarget, &mut ImpulseJoint)>,
 ) {
-    let t = tone.0.clamp(0.0, 1.0);
+    let t = (tone.0 * scale.0).clamp(0.0, 1.0);
     for (part, joint_info, target, mut joint) in &mut joints {
         let spec = muscle_spec(part.part);
         let mut data = *joint.data.as_ref();

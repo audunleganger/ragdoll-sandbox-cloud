@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 
+use crate::balance::{Balance, BalanceState};
 use crate::muscles::MuscleTone;
 use crate::physics::SlowMotion;
 use crate::player::MouseCaptured;
@@ -71,17 +72,24 @@ fn update_hud(
     slow: Res<SlowMotion>,
     captured: Res<MouseCaptured>,
     tone: Res<MuscleTone>,
+    person: Query<&Balance>,
 ) {
     let charge = match throw.charge {
         Some(c) => format!(" [{}{}]", "#".repeat((c * 10.0) as usize), "-".repeat(10 - (c * 10.0) as usize)),
         None => String::new(),
     };
     let mut status = format!(
-        "Weapon: {:?}\nThrow: {:?}{}\nMuscle tone: {:.0}%\n{}",
+        "Weapon: {:?}\nThrow: {:?}{}\nMuscle tone: {:.0}%\nPerson: {}\n{}",
         arsenal.current,
         throw.selected,
         charge,
         tone.0 * 100.0,
+        match person.iter().next().map(|b| b.state) {
+            Some(BalanceState::Standing) => "standing",
+            Some(BalanceState::Falling { .. }) => "falling!",
+            Some(BalanceState::Down) => "down (R to reset)",
+            None => "-",
+        },
         if slow.0 { "SLOW MOTION" } else { "" },
     );
     if !captured.0 {

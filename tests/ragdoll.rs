@@ -4,7 +4,10 @@
 //! Diagnostics that print what the body is doing over time are marked
 //! `#[ignore]`; run them with `cargo test -- --ignored --nocapture`.
 
+use std::time::Duration;
+
 use bevy::prelude::*;
+use bevy::time::TimeUpdateStrategy;
 use bevy_rapier3d::prelude::*;
 use ragdoll_sandbox::CorePlugin;
 use ragdoll_sandbox::muscles::MuscleTone;
@@ -17,6 +20,9 @@ fn sandbox(tone: f32) -> App {
     // One `app.update()` = exactly one physics step, the same step the game
     // uses, regardless of how fast the test machine is.
     app.insert_resource(TimestepMode::Fixed { dt: PHYSICS_DT, substeps: SUBSTEPS });
+    // The game clock (used by timers, e.g. how long since landing) also
+    // advances by exactly one physics step per update, not by wall-clock time.
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(PHYSICS_DT)));
     app.insert_resource(MuscleTone(tone));
     app.finish();
     app.cleanup();
@@ -172,6 +178,83 @@ fn the_game_uses_the_tested_time_step() {
 }
 
 // ---------------------------------------------------------------------------
+// Stage 3a: balance and fall reactions
+// ---------------------------------------------------------------------------
+
+fn balance_state(app: &mut App) -> ragdoll_sandbox::balance::BalanceState {
+    let mut q = app.world_mut().query::<&ragdoll_sandbox::balance::Balance>();
+    q.single(app.world()).unwrap().state
+}
+
+#[test]
+fn small_shoves_are_absorbed_in_every_direction() {
+    for (name, f, l) in [("forward", 1.0, 0.0), ("back", -1.0, 0.0), ("left", 0.0, 1.0), ("right", 0.0, -1.0)] {
+        assert!(survives_shove(true, f, l, 20.0), "a 20 N·s shove {name} knocked the person over");
+    }
+}
+
+#[test]
+fn balancing_beats_standing_like_a_statue() {
+    // Measured: a 20 N·s shove from the front topples the Stage 2 statue
+    // (muscles only) but not a balancing person.
+    assert!(!survives_shove(false, -1.0, 0.0, 20.0), "expected the statue to fall");
+    assert!(survives_shove(true, -1.0, 0.0, 20.0), "expected the balancing person to stay up");
+}
+
+#[test]
+fn a_big_shove_makes_them_fall_brace_and_relax() {
+    use ragdoll_sandbox::balance::BalanceState;
+    use ragdoll_sandbox::muscles::ToneScale;
+    let mut app = active();
+    run_seconds(&mut app, 1.0);
+    let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+    let fwd = pelvis.rotation * Vec3::Z;
+    let (chest, _, _) = part(&mut app, BodyPart::Chest);
+    app.world_mut().get_mut::<ExternalImpulse>(chest).unwrap().impulse = fwd * 120.0;
+
+    let mut saw_falling = false;
+    let mut best_reach = f32::MIN;
+    for _ in 0..30 {
+        run_seconds(&mut app, 0.1);
+        if let BalanceState::Falling { .. } = balance_state(&mut app) {
+            saw_falling = true;
+            let (_, chest_t, _) = part(&mut app, BodyPart::Chest);
+            let (_, hl, _) = part(&mut app, BodyPart::ForearmL);
+            let (_, hr, _) = part(&mut app, BodyPart::ForearmR);
+            let reach = ((hl.translation + hr.translation) / 2.0 - chest_t.translation).dot(fwd);
+            best_reach = best_reach.max(reach);
+        }
+    }
+    assert!(saw_falling, "never entered the falling state");
+    assert!(best_reach > 0.2, "hands never reached out ahead of the chest (best {best_reach:.2} m)");
+    assert_eq!(balance_state(&mut app), BalanceState::Down);
+    let tone = app.world().resource::<ToneScale>().0;
+    assert!(tone < 0.2, "still tensed on the ground (tone scale {tone:.2})");
+}
+
+#[test]
+fn balance_works_when_the_controller_only_runs_60_times_a_second() {
+    // In the game the controller runs once per rendered frame. At 60 fps that
+    // is one controller update per two physics steps. Same physics slices
+    // (1/480 s), half the controller rate:
+    let mut app = active();
+    app.insert_resource(TimestepMode::Fixed { dt: 1.0 / 60.0, substeps: SUBSTEPS * 2 });
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(1.0 / 60.0)));
+    for _ in 0..(60 * 10) {
+        app.update();
+    }
+    let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+    assert!(pelvis.translation.y > 0.9, "fell over at a 60 Hz control rate");
+    let (chest, _, _) = part(&mut app, BodyPart::Chest);
+    app.world_mut().get_mut::<ExternalImpulse>(chest).unwrap().impulse = pelvis.rotation * Vec3::Z * 20.0;
+    for _ in 0..(60 * 4) {
+        app.update();
+    }
+    let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+    assert!(pelvis.translation.y > 0.8, "a small shove toppled them at a 60 Hz control rate");
+}
+
+// ---------------------------------------------------------------------------
 // Diagnostics
 // ---------------------------------------------------------------------------
 
@@ -236,5 +319,190 @@ fn print_tone_sweep() {
         let (_, head, _) = part(&mut app, BodyPart::Head);
         let knee = joint_angle(&mut app, BodyPart::ThighL, BodyPart::ShinL, 0);
         println!("tone={tone:.1}: pelvis y={:.2} head y={:.2} knee={knee:.2}", pelvis.translation.y, head.translation.y);
+    }
+}
+
+/// Push the chest horizontally, `forward`/`left` in the person's own frame,
+/// with `impulse` N·s, then report whether they're still up after 4 s.
+fn survives_shove(balance: bool, forward: f32, left: f32, impulse: f32) -> bool {
+    survives_shove_tuned(balance, None, forward, left, impulse)
+}
+
+fn survives_shove_tuned(
+    balance: bool,
+    tuning: Option<ragdoll_sandbox::balance::BalanceTuning>,
+    forward: f32,
+    left: f32,
+    impulse: f32,
+) -> bool {
+    let mut app = active();
+    app.insert_resource(ragdoll_sandbox::balance::BalanceEnabled(balance));
+    if let Some(tuning) = tuning {
+        app.insert_resource(tuning);
+    }
+    run_seconds(&mut app, 1.0);
+    let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+    let fwd = pelvis.rotation * Vec3::Z;
+    let lft = pelvis.rotation * Vec3::X;
+    let (chest, _, _) = part(&mut app, BodyPart::Chest);
+    app.world_mut().get_mut::<ExternalImpulse>(chest).unwrap().impulse = (fwd * forward + lft * left) * impulse;
+    run_seconds(&mut app, 4.0);
+    let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+    pelvis.translation.y > 0.8
+}
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_shove_matrix() {
+    let impulses = [20.0, 40.0, 60.0, 80.0, 110.0, 150.0, 200.0];
+    for balance in [false, true] {
+        for (name, f, l) in [("forward", 1.0, 0.0), ("back", -1.0, 0.0), ("left", 0.0, 1.0), ("right", 0.0, -1.0)] {
+            let row: Vec<String> = impulses
+                .iter()
+                .map(|&j| if survives_shove(balance, f, l, j) { format!("{j:>4}:ok ") } else { format!("{j:>4}:FALL") })
+                .collect();
+            println!("balance={balance:<5} {name:<8} {}", row.join(" "));
+        }
+    }
+}
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_shove_timeline() {
+    use ragdoll_sandbox::balance::Balance;
+    let j: f32 = std::env::var("J").ok().and_then(|s| s.parse().ok()).unwrap_or(40.0);
+    let dir: f32 = std::env::var("DIR").ok().and_then(|s| s.parse().ok()).unwrap_or(1.0);
+    let mut app = active();
+    run_seconds(&mut app, 1.0);
+    let (chest, _, _) = part(&mut app, BodyPart::Chest);
+    let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+    let fwd = pelvis.rotation * Vec3::Z;
+    app.world_mut().get_mut::<ExternalImpulse>(chest).unwrap().impulse = fwd * dir * j;
+    for i in 0..30 {
+        run_seconds(&mut app, 0.05);
+        let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+        let ankle = joint_angle(&mut app, BodyPart::ShinL, BodyPart::FootL, 0);
+        let hip = joint_angle(&mut app, BodyPart::Pelvis, BodyPart::ThighL, 0);
+        let (_, foot, _) = part(&mut app, BodyPart::FootL);
+        let mut q = app.world_mut().query::<&Balance>();
+        let b = q.single(app.world()).unwrap();
+        let err = (b.capture_point - b.support_center) * Vec3::new(1.0, 0.0, 1.0);
+        let fwd_err = err.dot(fwd);
+        let com_fwd = (b.com - b.support_center).dot(fwd);
+        let toe_lift = (foot.rotation * Vec3::Y).dot(fwd);
+        println!(
+            "t={:.2} {:?} cp_err={fwd_err:+.3} com_fwd={com_fwd:+.3} v={:+.3} ankle={ankle:+.3} hip={hip:+.3} footTilt={toe_lift:+.3} pelvisY={:.2}",
+            (i + 1) as f32 * 0.05,
+            match b.state { ragdoll_sandbox::balance::BalanceState::Standing => "STAND", ragdoll_sandbox::balance::BalanceState::Falling { .. } => "FALL ", _ => "DOWN " },
+            b.com_velocity.dot(fwd), pelvis.translation.y
+        );
+    }
+}
+
+/// Largest impulse (from a fixed ladder) survived in a direction.
+fn max_survived(tuning: ragdoll_sandbox::balance::BalanceTuning, forward: f32, left: f32) -> f32 {
+    let mut best = 0.0;
+    for j in [10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 50.0] {
+        if survives_shove_tuned(true, Some(tuning), forward, left, j) {
+            best = j;
+        } else {
+            break;
+        }
+    }
+    best
+}
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_tuning_sweep() {
+    use ragdoll_sandbox::balance::BalanceTuning;
+    for ankle in [1.0, 2.5, 4.0] {
+        for max in [0.12, 0.2, 0.35] {
+            for hip in [-1.5, 0.0, 1.5] {
+                let t = BalanceTuning { ankle_gain_forward: ankle, ankle_gain_sideways: ankle, hip_gain: hip, max_ankle_correction: max };
+                let f = max_survived(t, 1.0, 0.0);
+                let b = max_survived(t, -1.0, 0.0);
+                let l = max_survived(t, 0.0, 1.0);
+                println!("ankle={ankle:.1} max={max:.2} hip={hip:+.1}: fwd={f:>3} back={b:>3} side={l:>3}");
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_fall_reaction() {
+    use ragdoll_sandbox::balance::{Balance, BalanceState};
+    for (name, f, l) in [("forward", 1.0, 0.0), ("back", -1.0, 0.0), ("left", 0.0, 1.0)] {
+        let mut app = active();
+        run_seconds(&mut app, 1.0);
+        let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+        let fwd = pelvis.rotation * Vec3::Z;
+        let lft = pelvis.rotation * Vec3::X;
+        let dir = fwd * f + lft * l;
+        let (chest, _, _) = part(&mut app, BodyPart::Chest);
+        app.world_mut().get_mut::<ExternalImpulse>(chest).unwrap().impulse = dir * 120.0;
+        for i in 0..12 {
+            run_seconds(&mut app, 0.1);
+            let (_, chest_t, _) = part(&mut app, BodyPart::Chest);
+            let (_, hand_l, _) = part(&mut app, BodyPart::ForearmL);
+            let (_, hand_r, _) = part(&mut app, BodyPart::ForearmR);
+            let hands = (hand_l.translation + hand_r.translation) / 2.0 - chest_t.translation;
+            let mut q = app.world_mut().query::<&Balance>();
+            let b = q.single(app.world()).unwrap();
+            let state = match b.state { BalanceState::Standing => "STAND", BalanceState::Falling { .. } => "FALL", BalanceState::Down => "DOWN" };
+            println!(
+                "{name:<7} t={:.1} {state:<5} hands vs chest: along fall {:+.2} up {:+.2} | chest y {:.2}",
+                (i + 1) as f32 * 0.1, hands.dot(dir), hands.y, chest_t.translation.y
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_protective_pose_static() {
+    use ragdoll_sandbox::balance::{BalanceEnabled, protective_pose};
+    use ragdoll_sandbox::muscles::JointTarget;
+    for (name, f, l) in [("forward", 1.0, 0.0), ("back", -1.0, 0.0), ("left", 0.0, 1.0)] {
+        let mut app = active();
+        app.insert_resource(BalanceEnabled(false));
+        run_seconds(&mut app, 0.5);
+        // Hold only the arm part of the pose, legs stay standing.
+        app.world_mut().remove_resource::<BalanceEnabled>();
+        app.insert_resource(BalanceEnabled(false));
+        let mut q = app.world_mut().query::<(&RagdollPart, &mut JointTarget)>();
+        for (p, mut t) in q.iter_mut(app.world_mut()) {
+            if matches!(p.part, BodyPart::UpperArmL | BodyPart::UpperArmR | BodyPart::ForearmL | BodyPart::ForearmR) {
+                t.0 = protective_pose(p.part, f, l);
+            }
+        }
+        // Balance disabled resets targets every frame; so step manually.
+        for step in [0.1, 0.2, 0.4, 0.8] {
+            run_seconds_keep(&mut app, step, f, l);
+            let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+            let (_, chest, _) = part(&mut app, BodyPart::Chest);
+            let (_, hl, _) = part(&mut app, BodyPart::ForearmL);
+            let (_, hr, _) = part(&mut app, BodyPart::ForearmR);
+            let inv = pelvis.rotation.inverse();
+            let rl = inv * (hl.translation - chest.translation);
+            let rr = inv * (hr.translation - chest.translation);
+            println!("{name:<7} after {step:.1}s: left hand (x={:+.2} y={:+.2} fwd={:+.2}) right hand (x={:+.2} y={:+.2} fwd={:+.2})", rl.x, rl.y, rl.z, rr.x, rr.y, rr.z);
+        }
+    }
+}
+
+/// Run while re-applying the arm part of the protective pose each frame.
+fn run_seconds_keep(app: &mut App, seconds: f32, f: f32, l: f32) {
+    use ragdoll_sandbox::balance::protective_pose;
+    use ragdoll_sandbox::muscles::JointTarget;
+    for _ in 0..(seconds / PHYSICS_DT).round() as usize {
+        app.update();
+        let mut q = app.world_mut().query::<(&RagdollPart, &mut JointTarget)>();
+        for (p, mut t) in q.iter_mut(app.world_mut()) {
+            if matches!(p.part, BodyPart::UpperArmL | BodyPart::UpperArmR | BodyPart::ForearmL | BodyPart::ForearmR) {
+                t.0 = protective_pose(p.part, f, l);
+            }
+        }
     }
 }

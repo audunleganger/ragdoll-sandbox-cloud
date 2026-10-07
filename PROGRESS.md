@@ -3,6 +3,38 @@
 Newest first. Each entry says what was built, how it was checked, and what
 you should look at when you run it.
 
+## Stage 3a: balance and fall reactions ✅ (tuning in progress, see below)
+
+**Built**
+- `balance.rs`: the "brain". Each frame it measures the centre of mass and
+  its velocity, predicts the *capture point* (where the body would come to
+  rest), and shifts the ankle and hip muscle targets to keep it over the feet.
+- Falling: when the capture point gets 30 cm outside the feet (or the chest
+  leans over 40°), the person gives up balancing and **braces**: arms thrown
+  toward the fall direction, chin tucked, knees softened. On landing, muscles
+  relax over 1.5 s to a low tone (lying there, not a noodle).
+- HUD shows the person's state: standing / falling / down.
+- Pistol impulse lowered from 40 to 22 N·s.
+
+**Measured (headless)**
+- Without stepping, the ankles can only absorb about 20–30 N·s at the chest.
+  That's physics, not tuning: 27 gain combinations all landed between 20
+  and 30. The feet are small, and pushing harder with the ankles only rolls
+  them onto their edges. Bigger hits need a *step* (Stage 3b).
+- A 20 N·s shove from the front topples the Stage 2 statue but not the
+  balancing person.
+- Falling forward, the hands reach ~30 cm ahead of the chest within 0.3 s.
+
+**Checked automatically** (`cargo test`, 11 tests)
+- 20 N·s shoves in all four directions are absorbed.
+- Balancing beats standing like a statue (same shove: statue falls, balancing doesn't).
+- A 120 N·s shove: falls, hands reach ahead of the chest, ends lying down relaxed.
+- Balance still works when the controller only runs 60 times a second.
+
+**Note on screenshots:** my in-game checks run on a virtual screen with software
+rendering at a few frames per second, so balance seen there isn't
+representative of your PC. The controller runs once per frame.
+
 ## Stage 2: muscles ✅
 
 **Built**

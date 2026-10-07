@@ -43,7 +43,9 @@ struct WeaponStats {
 
 fn stats(weapon: Weapon) -> WeaponStats {
     match weapon {
-        Weapon::Pistol => WeaponStats { impulse: 40.0, pellets: 1, spread: 0.0, cooldown: 0.2 },
+        // Tuned so one pistol shot rocks a standing person without dropping
+        // them (they can take about 25-30 N·s on their ankles; see PROGRESS.md).
+        Weapon::Pistol => WeaponStats { impulse: 22.0, pellets: 1, spread: 0.0, cooldown: 0.2 },
         Weapon::Shotgun => WeaponStats { impulse: 14.0, pellets: 9, spread: 0.06, cooldown: 0.8 },
     }
 }
