@@ -58,6 +58,8 @@ Click the window to capture the mouse; **Esc** releases it.
 | R | Reset the person to the start |
 | F | Spawn the person a few metres in front of you (e.g. on the platform) |
 | T | Toggle slow motion |
+| G | Muscles on / off (go limp) |
+| − / = | Muscle tone down / up |
 
 ## Tests
 

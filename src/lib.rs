@@ -6,6 +6,7 @@
 
 pub mod hud;
 pub mod layers;
+pub mod muscles;
 pub mod physics;
 pub mod player;
 pub mod ragdoll;
@@ -27,6 +28,7 @@ impl Plugin for CorePlugin {
             physics::PhysicsSettingsPlugin,
             world::WorldPlugin,
             ragdoll::RagdollPlugin,
+            muscles::MusclesPlugin,
         ));
     }
 }

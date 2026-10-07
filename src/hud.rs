@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 
+use crate::muscles::MuscleTone;
 use crate::physics::SlowMotion;
 use crate::player::MouseCaptured;
 use crate::throwing::ThrowState;
@@ -22,7 +23,8 @@ const CONTROLS: &str = "\
 WASD move | Shift sprint | Space jump | Mouse look
 LMB shoot | 1 pistol | 2 shotgun | E explosion at crosshair
 Hold RMB charge throw | Q ball/crate
-R reset person | F spawn person in front | T slow-mo | Esc free mouse";
+R reset person | F spawn person in front | T slow-mo | Esc free mouse
+G muscles on/off | - / = muscle tone";
 
 fn spawn_hud(mut commands: Commands) {
     // Crosshair: a "+" in the middle of the screen.
@@ -68,16 +70,18 @@ fn update_hud(
     throw: Res<ThrowState>,
     slow: Res<SlowMotion>,
     captured: Res<MouseCaptured>,
+    tone: Res<MuscleTone>,
 ) {
     let charge = match throw.charge {
         Some(c) => format!(" [{}{}]", "#".repeat((c * 10.0) as usize), "-".repeat(10 - (c * 10.0) as usize)),
         None => String::new(),
     };
     let mut status = format!(
-        "Weapon: {:?}\nThrow: {:?}{}\n{}",
+        "Weapon: {:?}\nThrow: {:?}{}\nMuscle tone: {:.0}%\n{}",
         arsenal.current,
         throw.selected,
         charge,
+        tone.0 * 100.0,
         if slow.0 { "SLOW MOTION" } else { "" },
     );
     if !captured.0 {

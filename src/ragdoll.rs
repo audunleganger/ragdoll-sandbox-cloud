@@ -5,8 +5,8 @@
 //! at one point (the anchor) and limits how they may rotate relative to each
 //! other, e.g. a knee only bends backwards.
 //!
-//! In Stage 1 the joints have no muscles: the body is a limp ragdoll. Muscles
-//! (motors that pull each joint toward a target angle) arrive in Stage 2.
+//! This file only builds the *skeleton*. The muscles that pull each joint
+//! toward a target angle live in `muscles.rs`.
 //!
 //! ## Coordinate conventions
 //!
@@ -23,6 +23,7 @@ use bevy_rapier3d::prelude::*;
 use bevy_rapier3d::rapier::dynamics::JointAxesMask;
 
 use crate::layers;
+use crate::muscles::{JointTarget, LIMP_DAMPING, standing_pose};
 use crate::shape::{Paint, Shape};
 
 /// Which part of the body an entity is.
@@ -59,6 +60,8 @@ pub struct RagdollJoint {
     pub anchor_on_parent: Vec3,
     /// Joint position in this part's local coordinates.
     pub anchor_on_child: Vec3,
+    /// Torque (N·m) of the joint's friction, which remains when muscles are off.
+    pub friction: f32,
 }
 
 /// Send this message to remove the current person and spawn a fresh one.
@@ -225,9 +228,12 @@ fn build_joint(def: &JointDef, anchor_on_parent: Vec3, anchor_on_child: Vec3) ->
         if let Some(range) = limit {
             builder = builder
                 .limits(axis, range)
-                // A motor that tries to hold the joint still (target speed 0)
-                // but is weak (max torque = friction) behaves like friction.
-                .motor_velocity(axis, 0.0, 1.0)
+                // "Force based" = motor settings are in real units (N·m).
+                .motor_model(axis, MotorModel::ForceBased)
+                // A motor that only resists motion (pure damping) and is weak
+                // (max torque = friction) behaves like friction. `muscles.rs`
+                // replaces this with real muscle settings every frame.
+                .set_motor(axis, 0.0, 0.0, 0.0, LIMP_DAMPING)
                 .motor_max_force(axis, def.friction);
         }
     }
@@ -263,6 +269,8 @@ pub fn spawn_ragdoll(commands: &mut Commands, position: Vec3, yaw: f32) -> Entit
                 def.shape,
                 Paint(part_color(def.part)),
                 Transform::from_translation(position + rotation * def.center).with_rotation(rotation),
+                // Physics components, grouped because Bevy limits how many fit in one tuple.
+                (
                 RigidBody::Dynamic,
                 def.shape.collider(),
                 // Mass is set directly instead of from density, so the body
@@ -275,6 +283,12 @@ pub fn spawn_ragdoll(commands: &mut Commands, position: Vec3, yaw: f32) -> Entit
                 Damping { linear_damping: 0.05, angular_damping: 0.5 },
                 Velocity::default(),
                 ExternalImpulse::default(),
+                // Rapier normally "puts to sleep" bodies that stop moving, to
+                // save work. Muscles change from frame to frame, so stay awake.
+                Sleeping::disabled(),
+                // Smooth rendering between physics steps (see `physics.rs`).
+                TransformInterpolation::default(),
+                ),
             ))
             .id();
         entities.insert(def.part, entity);
@@ -288,7 +302,8 @@ pub fn spawn_ragdoll(commands: &mut Commands, position: Vec3, yaw: f32) -> Entit
         let joint = build_joint(&def, anchor_on_parent, anchor_on_child);
         commands.entity(entities[&def.child]).insert((
             ImpulseJoint::new(parent, TypedJoint::GenericJoint(joint)),
-            RagdollJoint { parent, anchor_on_parent, anchor_on_child },
+            RagdollJoint { parent, anchor_on_parent, anchor_on_child, friction: def.friction },
+            JointTarget(standing_pose(def.child)),
         ));
     }
 

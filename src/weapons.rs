@@ -88,6 +88,7 @@ fn shoot(
     camera: Single<&GlobalTransform, With<PlayerCamera>>,
     rapier: ReadRapierContext,
     mut bodies: Query<(&GlobalTransform, &mut ExternalImpulse)>,
+    names: Query<&Name>,
     mut seed: Local<u32>,
 ) {
     arsenal.cooldown -= time.delta_secs();
@@ -115,6 +116,8 @@ fn shoot(
         let Some((entity, distance)) = hit else { continue };
         let point = origin + dir * distance;
         spawn_marker(&mut commands, point);
+        let name = names.get(entity).map(|n| n.as_str()).unwrap_or("?");
+        debug!("{:?} hit {name} at {point:.2}", arsenal.current);
 
         // Hit something movable? Kick it at the hit point. The spin part
         // (torque impulse) is lever arm × impulse, measured from the body's

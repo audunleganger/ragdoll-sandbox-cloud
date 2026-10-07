@@ -13,6 +13,7 @@ use bevy_rapier3d::control::{KinematicCharacterController, KinematicCharacterCon
 use bevy_rapier3d::prelude::*;
 
 use crate::layers;
+use crate::muscles::MuscleTone;
 use crate::physics::SlowMotion;
 use crate::ragdoll::{RagdollPart, SpawnRagdoll};
 use crate::shape::{Paint, Shape};
@@ -228,13 +229,15 @@ fn barge(
 }
 
 /// R = reset the person at the start, F = drop a new person in front of you,
-/// T = toggle slow motion.
+/// T = toggle slow motion, G = muscles on/off, - and = = muscle tone down/up.
 fn sandbox_keys(
     keys: Res<ButtonInput<KeyCode>>,
     player: Single<&Transform, With<Player>>,
     camera: Single<&PlayerCamera>,
     mut spawn: MessageWriter<SpawnRagdoll>,
     mut slow: ResMut<SlowMotion>,
+    mut tone: ResMut<MuscleTone>,
+    mut tone_before_limp: Local<Option<f32>>,
 ) {
     if keys.just_pressed(KeyCode::KeyR) {
         spawn.write(SpawnRagdoll::START);
@@ -248,5 +251,24 @@ fn sandbox_keys(
     }
     if keys.just_pressed(KeyCode::KeyT) {
         slow.0 = !slow.0;
+    }
+    if keys.just_pressed(KeyCode::KeyG) {
+        // Remember the tone when going limp, to restore it afterwards.
+        match tone_before_limp.take() {
+            Some(previous) => tone.0 = previous,
+            None => {
+                *tone_before_limp = Some(tone.0);
+                tone.0 = 0.0;
+            }
+        }
+    }
+    let step = 0.1;
+    if keys.just_pressed(KeyCode::Minus) {
+        tone.0 = (tone.0 - step).max(0.0);
+        *tone_before_limp = None;
+    }
+    if keys.just_pressed(KeyCode::Equal) {
+        tone.0 = (tone.0 + step).min(1.0);
+        *tone_before_limp = None;
     }
 }

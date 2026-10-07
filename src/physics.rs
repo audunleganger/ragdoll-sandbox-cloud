@@ -1,49 +1,86 @@
-//! Global physics settings: solver quality and the slow-motion toggle.
+//! Global physics settings: a fixed time step, solver quality, contact
+//! stiffness, and the slow-motion toggle.
+//!
+//! ## Why a *fixed* time step
+//!
+//! The simulation advances in small time steps. Many physics details (how
+//! stiff contacts are, how muscles respond) depend on the step size. If the
+//! step followed your monitor's frame rate, a 60 Hz and a 144 Hz monitor would
+//! simulate a *different person*: one might stand while the other topples.
+//!
+//! So physics always advances in steps of exactly `PHYSICS_DT`, each split
+//! into `SUBSTEPS` smaller steps, however fast the screen refreshes. Rendering
+//! then *interpolates* (blends) between the last two physics states so motion
+//! looks smooth at any frame rate. The headless tests use exactly these values
+//! too, so they test the same physics you see.
+
+use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
+/// Physics steps per second.
+pub const PHYSICS_HZ: f32 = 120.0;
+pub const PHYSICS_DT: f32 = 1.0 / PHYSICS_HZ;
+
+/// Each physics step is split into this many substeps, so the solver works in
+/// 1/480 s slices. The body is a chain of 14 parts held together by joints and
+/// standing on two small feet; we found that larger slices let it slowly tip
+/// over, even with strong muscles (see `PROGRESS.md`, Stage 2).
+pub const SUBSTEPS: usize = 4;
+
 /// Simulated seconds per real second while slow motion is on.
 pub const SLOW_MOTION_SCALE: f32 = 0.2;
-
-/// Each frame's physics step is split into this many smaller steps. A body is
-/// a chain of 14 parts held together by joints, and joint chains stay much
-/// tighter with small steps than with one big one.
-pub const SUBSTEPS: usize = 4;
 
 /// Whether slow motion is on. Toggled by the player (see `player.rs`).
 #[derive(Resource, Default)]
 pub struct SlowMotion(pub bool);
+
+/// The time-step mode the game uses. Tests use `Fixed` with the same values.
+pub fn game_timestep() -> TimestepMode {
+    TimestepMode::Interpolated { dt: PHYSICS_DT, time_scale: 1.0, substeps: SUBSTEPS }
+}
 
 pub struct PhysicsSettingsPlugin;
 
 impl Plugin for PhysicsSettingsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SlowMotion>()
-            // "Variable" = advance physics by however long the last frame took
-            // (capped so a lag spike can't make the simulation explode).
-            .insert_resource(TimestepMode::Variable {
-                max_dt: 1.0 / 60.0,
-                time_scale: 1.0,
-                substeps: SUBSTEPS,
-            })
+            .insert_resource(game_timestep())
+            .add_systems(Startup, cap_frame_time)
             .add_systems(Update, (configure_solver, apply_slow_motion));
     }
 }
 
+/// If a frame takes very long (window dragged, PC busy), don't try to catch up
+/// on all the missed physics at once: that can snowball into an ever-slower
+/// game. Instead, the game briefly runs in slow motion.
+fn cap_frame_time(mut time: ResMut<Time<Virtual>>) {
+    time.set_max_delta(Duration::from_millis(100));
+}
+
 /// The solver resolves all contacts and joints by repeatedly nudging bodies
 /// until they (almost) agree. More iterations = stiffer joints, less jitter.
+///
+/// Contacts are slightly "soft": shapes may sink into each other a tiny bit and
+/// get pushed back out like a stiff spring. With 80 kg on two small feet, the
+/// default softness lets the heels sink just enough to tip the body over, so we
+/// make contacts stiffer.
 fn configure_solver(mut sims: Query<&mut RapierContextSimulation, Added<RapierContextSimulation>>) {
     for mut sim in &mut sims {
-        sim.integration_parameters.num_solver_iterations = 8;
+        let params = &mut sim.integration_parameters;
+        params.num_solver_iterations = 8;
+        params.contact_softness.natural_frequency = 120.0;
+        params.contact_softness.damping_ratio = 10.0;
+        params.static_contact_softness.natural_frequency = 120.0;
+        params.static_contact_softness.damping_ratio = 10.0;
     }
 }
 
-fn apply_slow_motion(slow: Res<SlowMotion>, mut mode: ResMut<TimestepMode>) {
-    if !slow.is_changed() {
-        return;
-    }
-    if let TimestepMode::Variable { time_scale, .. } = mode.as_mut() {
-        *time_scale = if slow.0 { SLOW_MOTION_SCALE } else { 1.0 };
+/// Slow motion slows down the whole game clock. Physics keeps its exact step
+/// size and just takes fewer steps per real second.
+fn apply_slow_motion(slow: Res<SlowMotion>, mut time: ResMut<Time<Virtual>>) {
+    if slow.is_changed() {
+        time.set_relative_speed(if slow.0 { SLOW_MOTION_SCALE } else { 1.0 });
     }
 }
