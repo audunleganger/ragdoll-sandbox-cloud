@@ -361,6 +361,44 @@ fn pushed_off_the_platform_edge_they_fall_to_the_ground_below() {
 }
 
 // ---------------------------------------------------------------------------
+// The game's own timing
+// ---------------------------------------------------------------------------
+
+/// Run with the game's real time-step mode (interpolated) at a given frame
+/// rate: physics steps whenever enough time has built up, and positions are
+/// smoothed between steps, which is what the balance controller then sees.
+fn game_timing(fps: f32) -> App {
+    let mut app = active();
+    app.insert_resource(ragdoll_sandbox::physics::game_timestep());
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(1.0 / fps)));
+    app
+}
+
+fn frames(app: &mut App, fps: f32, seconds: f32) {
+    for _ in 0..(seconds * fps).round() as usize {
+        app.update();
+    }
+}
+
+#[test]
+fn with_the_games_own_timing_they_stand_and_catch_a_stagger() {
+    // The controller runs once per rendered frame. From 60 fps up it catches
+    // the full 30 N·s; at 30 fps it updates only every 4 physics steps and
+    // manages 20 N·s (measured with `print_game_timing`).
+    for (fps, shove) in [(30.0, 20.0), (60.0, 30.0), (90.0, 30.0), (144.0, 30.0)] {
+        let mut app = game_timing(fps);
+        frames(&mut app, fps, 5.0);
+        let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+        assert!(pelvis.translation.y > 0.9, "at {fps} fps they didn't stand (pelvis {:.2})", pelvis.translation.y);
+        let (chest, _, _) = part(&mut app, BodyPart::Chest);
+        app.world_mut().get_mut::<ExternalImpulse>(chest).unwrap().impulse = pelvis.rotation * Vec3::Z * shove;
+        frames(&mut app, fps, 4.0);
+        let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+        assert!(pelvis.translation.y > 0.8, "at {fps} fps a {shove} N·s shove knocked them over");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Diagnostics
 // ---------------------------------------------------------------------------
 
@@ -854,5 +892,31 @@ fn print_stair_shove() {
         let b = q.single(app.world()).unwrap();
         let st = match b.state { BalanceState::Stepping { to, .. } => format!("STEP to {to:.2}"), s => format!("{s:?}").chars().take(8).collect() };
         println!("t={:.2} pelvis={:.2} footL={:.2} footR={:.2} cp={:.2} {st}", (i + 1) as f32 * 0.05, pelvis.translation, fl.translation, fr.translation, b.capture_point);
+    }
+}
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_game_timing() {
+    for fps in [20.0, 30.0, 45.0, 60.0, 90.0, 144.0] {
+        let mut results = vec![];
+        for j in [20.0, 30.0] {
+            let mut app = game_timing(fps);
+            app.update();
+            if std::env::var("NOINTERP").is_ok() {
+                let ids: Vec<Entity> = app.world_mut().query_filtered::<Entity, With<RagdollPart>>().iter(app.world()).collect();
+                for e in ids {
+                    app.world_mut().entity_mut(e).remove::<TransformInterpolation>();
+                }
+            }
+            frames(&mut app, fps, 3.0);
+            let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+            let (chest, _, _) = part(&mut app, BodyPart::Chest);
+            app.world_mut().get_mut::<ExternalImpulse>(chest).unwrap().impulse = pelvis.rotation * Vec3::Z * j;
+            frames(&mut app, fps, 4.0);
+            let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+            results.push(format!("{j} N·s: {}", if pelvis.translation.y > 0.8 { "ok" } else { "FALL" }));
+        }
+        println!("{fps:>5} fps: {}", results.join(", "));
     }
 }

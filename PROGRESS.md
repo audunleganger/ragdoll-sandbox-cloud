@@ -3,6 +3,31 @@
 Newest first. Each entry says what was built, how it was checked, and what
 you should look at when you run it.
 
+## Real game timing ✅ (with a frame-rate caveat)
+
+All earlier tests advanced physics one fixed step at a time. The game itself
+steps physics whenever enough real time has passed and *smooths* positions
+between steps for display. A new test runs that exact mode at 20–144 fps.
+
+**Found:** the balance controller was reading the smoothed positions, which
+lag the real physics slightly, and at 90 fps a 30 N·s shove then knocked them
+over. Fixed: the controller now reads position, rotation and velocity straight
+from the physics engine.
+
+**Measured with the game's own timing** (30 N·s forward shove after standing 3 s):
+
+| fps | 20 | 30 | 45 | 60 | 90 | 144 |
+|---|---|---|---|---|---|---|
+| stands | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 20 N·s shove | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 30 N·s shove | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ |
+
+**Caveat:** the controller runs once per rendered frame, so below ~60 fps it
+updates only every 2–4 physics steps and the hardest shoves get through. The
+proper fix is to run the controller inside the fixed physics step (Bevy's
+`FixedUpdate`) and smooth the rendering separately. That's a bigger
+restructuring that I didn't want to do overnight without you able to check how it looks.
+
 ## Terrain: platform, stairs, ramp ✅ (partly, see the limits)
 
 You picked ledges, stairs and a ramp to push people off, but until now every

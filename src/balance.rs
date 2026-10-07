@@ -30,7 +30,7 @@
 //! before the body has leaned far.
 
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::{CollisionGroups, Group, QueryFilter, ReadRapierContext, Velocity};
+use bevy_rapier3d::prelude::{CollisionGroups, Group, QueryFilter, RapierRigidBodyHandle, ReadRapierContext, Velocity};
 
 use crate::layers;
 
@@ -246,7 +246,31 @@ struct BodyState {
     lowest_y: f32,
 }
 
-fn sense(parts: &Query<(&RagdollPart, &Transform, &Velocity)>, pelvis: &Transform) -> BodyState {
+/// A body part's true physics state. In the game, `Transform` is *smoothed*
+/// for display (blended between the last two physics steps), so it lags
+/// slightly behind; balancing on lagging information is measurably worse.
+/// So read position, rotation and velocity straight from the physics engine.
+fn true_state(
+    rapier: &ReadRapierContext,
+    handle: Option<&RapierRigidBodyHandle>,
+    transform: &Transform,
+    velocity: &Velocity,
+) -> (Transform, Vec3) {
+    let body = rapier
+        .single()
+        .ok()
+        .zip(handle)
+        .and_then(|(context, handle)| context.rigidbody_set.bodies.get(handle.0).map(|b| (*b.position(), b.linvel())));
+    match body {
+        Some((pose, linvel)) => (Transform::from_translation(pose.translation).with_rotation(pose.rotation), linvel),
+        // Not in the physics engine yet (just spawned): use the components.
+        None => (*transform, velocity.linear),
+    }
+}
+
+type PartQuery<'w, 's> = Query<'w, 's, (Entity, &'static RagdollPart, &'static Transform, &'static Velocity, Option<&'static RapierRigidBodyHandle>)>;
+
+fn sense(parts: &PartQuery, rapier: &ReadRapierContext, pelvis: &Transform) -> BodyState {
     let mut mass = 0.0;
     let mut com = Vec3::ZERO;
     let mut momentum = Vec3::ZERO;
@@ -255,11 +279,13 @@ fn sense(parts: &Query<(&RagdollPart, &Transform, &Velocity)>, pelvis: &Transfor
     let mut foot_r = Vec3::ZERO;
     let mut chest_up = Vec3::Y;
     let mut lowest_y = f32::MAX;
-    for (part, transform, velocity) in parts.iter() {
+    for (_, part, transform, velocity, handle) in parts.iter() {
+        let (transform, linear) = true_state(rapier, handle, transform, velocity);
+        let transform = &transform;
         lowest_y = lowest_y.min(transform.translation.y);
         mass += part.mass;
         com += transform.translation * part.mass;
-        momentum += velocity.linear * part.mass;
+        momentum += linear * part.mass;
         match part.part {
             BodyPart::FootL => {
                 feet += transform.translation / 2.0;
@@ -397,13 +423,16 @@ fn think(
     enabled: Res<BalanceEnabled>,
     tuning: Res<BalanceTuning>,
     mut tone_scale: ResMut<ToneScale>,
-    mut people: Query<(&mut Balance, &Transform)>,
-    parts: Query<(&RagdollPart, &Transform, &Velocity)>,
+    mut people: Query<(Entity, &mut Balance)>,
+    parts: PartQuery,
     mut targets: Query<(&RagdollPart, &mut JointTarget)>,
     rapier: ReadRapierContext,
 ) {
-    let Some((mut balance, pelvis)) = people.iter_mut().next() else { return };
-    let body = sense(&parts, pelvis);
+    let Some((pelvis_entity, mut balance)) = people.iter_mut().next() else { return };
+    let Ok((_, _, pelvis_transform, pelvis_velocity, pelvis_handle)) = parts.get(pelvis_entity) else { return };
+    let (pelvis, _) = true_state(&rapier, pelvis_handle, pelvis_transform, pelvis_velocity);
+    let pelvis = &pelvis;
+    let body = sense(&parts, &rapier, pelvis);
     let dt = time.delta_secs();
     balance.time_in_state += dt;
 
