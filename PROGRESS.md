@@ -3,6 +3,55 @@
 Newest first. Each entry says what was built, how it was checked, and what
 you should look at when you run it.
 
+## Stage 3b: stepping (stagger) ✅
+
+**Built**
+- When the ankles can't cope (capture point past the edge of the feet), the
+  person **takes a step**: the foot swings along a small arc and lands just
+  past the capture point, re-aiming mid-swing as the body keeps moving.
+  Legs alternate, up to 6 steps in a row, then they fall.
+- Leg positioning uses two-segment *inverse kinematics* (law of cosines for
+  the knee, then the hip angles), with the foot kept flat.
+- While on one leg, the standing hip keeps the pelvis upright *in the world*
+  (the SIMBICON trick). Arms fling out sideways: the classic stagger.
+- HUD shows "staggering".
+
+**Measured (headless, chest shoves)**
+
+| Direction | Ankles only (3a) | With stepping (3b) |
+|---|---|---|
+| forward | 20 N·s | 30 N·s |
+| back | 25 N·s | 35 N·s |
+| left | 20 N·s | 35 N·s |
+| right | 20 N·s | 35 N·s |
+
+**Problems found and fixed on the way**
+- The first version fell more often than no stepping at all. Tracing single
+  steps showed: the target was chosen once and went stale while the body kept moving
+  (fixed: re-aim every frame); the foot lagged its path (fixed: aim 0.08 s
+  ahead); the pelvis pitched forward on one leg (fixed: world-upright hip
+  control); the second step reused the leg that had just landed and was
+  carrying the weight (fixed: always alternate); the sideways pelvis
+  correction had the wrong sign (found by sweeping both signs: limit 20 → 40).
+- Making the arms reach forward during a step looked more protective but
+  moved the body's weight forward and broke forward staggers, so they fling
+  sideways instead.
+
+**Checked automatically** (16 tests): 30 N·s shoves caught in every direction
+(and not without stepping); a stagger takes at least one step and ends
+standing still; all earlier tests still pass. Also checked: 30 N·s holds in every
+direction with the controller at 60 Hz.
+
+**Checked by screenshot:** two quick pistol shots. The first makes the person
+stagger (arms out, foot lifting); the second catches them mid-step, and they
+twist and fall reaching out with an arm, then lie still.
+
+**Please check when you run it**
+- Shoot once, then twice quickly. Shove with Shift-sprint into them. Does the
+  stagger look like a stagger?
+- Watch in slow motion (T): steps take 0.32 s; does that look too quick or slow?
+  (`step_duration` in `balance.rs`.)
+
 ## Stage 3a tuning: pistol, lean, foot creep ✅
 
 **What was wrong:** in the game a single pistol shot still knocked the person

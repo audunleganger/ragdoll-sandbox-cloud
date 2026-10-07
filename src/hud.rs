@@ -86,6 +86,7 @@ fn update_hud(
         tone.0 * 100.0,
         match person.iter().next().map(|b| b.state) {
             Some(BalanceState::Standing) => "standing",
+            Some(BalanceState::Stepping { .. }) => "staggering",
             Some(BalanceState::Falling { .. }) => "falling!",
             Some(BalanceState::Down) => "down (R to reset)",
             None => "-",

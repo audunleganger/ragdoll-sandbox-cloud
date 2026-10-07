@@ -116,7 +116,56 @@ under 800 N·m/rad, and the person topples over stiffly instead of standing.
 **Stage 2 limitation:** muscles hold a *pose*, they don't *balance*. Push the
 person and they tip over stiffly, like a statue. Fixing that is Stage 3.
 
-## 5. Shooting (`weapons.rs`)
+## 5. Balance, stepping and falling (`balance.rs`)
+
+Muscles hold whatever pose they're given. The **balance controller** is the
+"brain" that picks that pose every frame. It's a small *state machine*:
+
+```text
+Standing ──(ankles not enough)──▶ Stepping ──(foot planted)──▶ Standing
+    │                                │
+    └──(hopeless / tipping over)─────┴──▶ Falling ──(landed)──▶ Down
+```
+
+**Sensing.** Add up every body part's position × mass to get the **centre of
+mass** (COM), and the same for velocities. The feet's positions give the
+**support area**.
+
+**The capture point.** A standing body is like an upside-down pendulum. If
+the COM is at height *h* and moving at speed *v*, it would come to rest above
+
+```text
+capture point = COM + v × √(h / g)        (g = 9.81 m/s²)
+```
+
+If your feet are under that point, you can stop. If not, you'll fall unless
+you step. Because it includes speed, the controller reacts to a shove at once,
+before the body has visibly leaned.
+
+**Ankle strategy (Standing).** If the capture point is ahead of the feet, press
+the toes down a little; if behind, lift them. In code: nudge the ankle muscle
+targets in proportion to the error. There's a hard limit: a foot can only push
+as hard as *weight × distance to the toe* before it rolls onto its edge. That's
+why the person stands with a ~1° forward lean: it centres their weight over the
+feet, leaving room to sway both ways.
+
+**Stepping.** Once the capture point passes the edge of the feet, the ankles
+can't win; a human takes a step. We choose a leg (the side of a sideways push,
+then alternating), aim the foot just past the capture point (re-aiming every
+frame as the body moves), and swing it along an arc. To put the foot where we
+want, we need joint angles: that's **inverse kinematics**. For a two-segment leg
+it's the law of cosines: the hip-to-ankle distance fixes the knee bend, and the
+direction fixes the hip angles. Meanwhile, the standing hip keeps the pelvis
+upright *in the world* (a trick from SIMBICON, a well-known walking controller).
+
+**Falling.** If even a step can't reach (or the chest tips past ~40°), the
+person **braces**: arms thrown toward the fall, chin tucked, knees soft. After
+landing, muscle tone fades to ~12% over 1.5 s: lying there, not a noodle.
+
+**How strong a shove can they take?** About 30–35 N·s at the chest (a 40 kg
+crate at 1 m/s). Ankles alone managed 20–25.
+
+## 6. Shooting (`weapons.rs`)
 
 Guns are **hitscan**: no bullet flies through the air. We cast an invisible ray
 from the camera through the crosshair, find the first thing it hits, and give
@@ -133,7 +182,7 @@ The shotgun fires 9 rays with random spread, each weaker than a pistol round.
 closer it is, with some extra upward lift. The kick is scaled by each part's mass,
 so light and heavy parts get the same change in speed.
 
-## 6. Throwing (`throwing.rs`)
+## 7. Throwing (`throwing.rs`)
 
 Thrown objects are real dynamic bodies, so the physics engine resolves their
 collision with the person by itself. What matters is **momentum** (mass ×
@@ -144,7 +193,7 @@ Fast, small objects can pass through thin things between two physics steps
 ("tunnelling"). **CCD** (continuous collision detection) checks the path
 between steps to prevent that.
 
-## 7. The player and camera (`player.rs`)
+## 8. The player and camera (`player.rs`)
 
 The player is a **kinematic character controller**: each frame we say "I'd
 like to move this much" and Rapier slides us along walls, up steps and down
@@ -157,14 +206,16 @@ the camera in front of it.
 **Shoulder-barging:** when the controller reports bumping into a body part
 while moving, we kick that part with an impulse proportional to your speed.
 
-## 8. Collision layers (`layers.rs`)
+## 9. Collision layers (`layers.rs`)
 
 Every collider belongs to a **group** (world, ragdoll, player, prop) and lists
 which groups it collides with. The aim ray, for example, ignores the player,
 so you never shoot yourself in the back of the head.
 
-## Coming next
+## Not built (yet)
 
-- **Stage 3a (balance):** keeping the centre of mass over the feet, stumbling,
-  throwing arms out when falling.
-- **Stage 3b (stepping):** taking a step to catch a fall.
+- Getting back up after falling.
+- Walking around on their own (AI locomotion).
+- Shot reactions per body part (clutching a wounded arm, legs buckling when
+  shot in the knee). The physics of the hit is already per body part; the
+  "brain" doesn't react to *where* yet.
