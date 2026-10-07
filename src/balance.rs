@@ -30,7 +30,9 @@
 //! before the body has leaned far.
 
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::Velocity;
+use bevy_rapier3d::prelude::{CollisionGroups, Group, QueryFilter, ReadRapierContext, Velocity};
+
+use crate::layers;
 
 use crate::muscles::{JointTarget, ToneScale, standing_pose};
 use crate::ragdoll::{BodyPart, RagdollPart};
@@ -96,6 +98,12 @@ const STEP_LEAD: f32 = 0.08;
 /// Leg segment lengths (hip to knee, knee to ankle), from `ragdoll.rs`.
 const THIGH: f32 = 0.42;
 const SHIN: f32 = 0.42;
+/// Highest step up / furthest step down (m) a foot may land on. A ledge that
+/// drops further than this can't be stepped down: the person falls off it.
+const MAX_STEP_UP: f32 = 0.35;
+const MAX_STEP_DOWN: f32 = 0.45;
+/// Half the foot's thickness: from the foot's centre down to the sole.
+const SOLE: f32 = 0.03;
 /// Hip joint position relative to the pelvis centre (left side; mirror x).
 const HIP_OFFSET: Vec3 = Vec3::new(0.09, -0.05, 0.0);
 /// Ankle height above the ground, and how far the foot's centre sits in
@@ -227,9 +235,15 @@ struct BodyState {
     left: Vec3,
     /// How far the chest leans away from vertical (radians).
     chest_tilt: f32,
-    /// Centre of each foot, projected onto the ground.
+    /// Bottom-centre of each foot's sole (world position, not flattened).
     foot_l: Vec3,
     foot_r: Vec3,
+    /// Height of the ground the person stands on: the lower sole. (Not the
+    /// average: a foot lifted mid-step would raise the "ground", shrink the
+    /// capture-point prediction, and make every step land short.)
+    ground_y: f32,
+    /// Height of the lowest body part, to recognise lying down anywhere.
+    lowest_y: f32,
 }
 
 fn sense(parts: &Query<(&RagdollPart, &Transform, &Velocity)>, pelvis: &Transform) -> BodyState {
@@ -240,18 +254,20 @@ fn sense(parts: &Query<(&RagdollPart, &Transform, &Velocity)>, pelvis: &Transfor
     let mut foot_l = Vec3::ZERO;
     let mut foot_r = Vec3::ZERO;
     let mut chest_up = Vec3::Y;
+    let mut lowest_y = f32::MAX;
     for (part, transform, velocity) in parts.iter() {
+        lowest_y = lowest_y.min(transform.translation.y);
         mass += part.mass;
         com += transform.translation * part.mass;
         momentum += velocity.linear * part.mass;
         match part.part {
             BodyPart::FootL => {
                 feet += transform.translation / 2.0;
-                foot_l = transform.translation * Vec3::new(1.0, 0.0, 1.0);
+                foot_l = transform.translation - Vec3::Y * SOLE;
             }
             BodyPart::FootR => {
                 feet += transform.translation / 2.0;
-                foot_r = transform.translation * Vec3::new(1.0, 0.0, 1.0);
+                foot_r = transform.translation - Vec3::Y * SOLE;
             }
             BodyPart::Chest => chest_up = transform.rotation * Vec3::Y,
             _ => {}
@@ -269,12 +285,39 @@ fn sense(parts: &Query<(&RagdollPart, &Transform, &Velocity)>, pelvis: &Transfor
         chest_tilt: chest_up.angle_between(Vec3::Y),
         foot_l,
         foot_r,
+        ground_y: foot_l.y.min(foot_r.y),
+        lowest_y,
     }
+}
+
+/// Look straight down from `from` for solid ground (map geometry only),
+/// up to `max_down` metres. Returns the ground point and its surface normal
+/// (the direction the surface faces; straight up on flat ground).
+fn ground_below(rapier: &ReadRapierContext, from: Vec3, max_down: f32) -> Option<(Vec3, Vec3)> {
+    let context = rapier.single().ok()?;
+    let only_world = QueryFilter::new().groups(CollisionGroups::new(Group::ALL, layers::WORLD));
+    context
+        .with_query_pipeline(only_world, |q| q.cast_ray_and_get_normal(from, Vec3::NEG_Y, max_down, true))
+        .map(|(_, hit)| (hit.point, hit.normal))
+}
+
+/// Ankle angles that keep the body upright when the ground under the feet is
+/// sloped. On a slope rising forward (toes up), the ankle bends the toes up
+/// relative to the shin (negative X); rising to the left, it rolls (positive Z).
+fn slope_compensation(normal: Vec3, body: &BodyState) -> Vec3 {
+    let toes_up = (-normal.dot(body.forward)).clamp(-1.0, 1.0).asin();
+    let left_up = (-normal.dot(body.left)).clamp(-1.0, 1.0).asin();
+    Vec3::new(-toes_up, 0.0, left_up)
 }
 
 /// Decide where to step: which leg, and where its foot should land.
 /// Returns `None` if the capture point is out of reach (time to fall).
-fn plan_step(body: &BodyState, capture_point: Vec3, last: Option<Side>) -> Option<(Side, Vec3, Vec3)> {
+fn plan_step(
+    body: &BodyState,
+    rapier: &ReadRapierContext,
+    capture_point: Vec3,
+    last: Option<Side>,
+) -> Option<(Side, Vec3, Vec3)> {
     let error = (capture_point - body.support_center) * Vec3::new(1.0, 0.0, 1.0);
     let lateral = error.dot(body.left);
     let forward = error.dot(body.forward);
@@ -296,7 +339,7 @@ fn plan_step(body: &BodyState, capture_point: Vec3, last: Option<Side>) -> Optio
         Side::Left => body.foot_l,
         Side::Right => body.foot_r,
     };
-    let target = step_target(body, capture_point, side)?;
+    let target = step_target(body, rapier, capture_point, side)?;
     Some((side, swing, target))
 }
 
@@ -304,19 +347,25 @@ fn plan_step(body: &BodyState, capture_point: Vec3, last: Option<Side>) -> Optio
 /// capture point, on its own side of the body (so the capture point ends up
 /// between the two feet), never crossing the other leg. `None` if that's
 /// further than a step can reach.
-fn step_target(body: &BodyState, capture_point: Vec3, side: Side) -> Option<Vec3> {
+fn step_target(body: &BodyState, rapier: &ReadRapierContext, capture_point: Vec3, side: Side) -> Option<Vec3> {
     let stance = match side {
         Side::Left => body.foot_r,
         Side::Right => body.foot_l,
     };
-    let cp = Vec3::new(capture_point.x, 0.0, capture_point.z);
-    let error = cp - body.support_center;
+    // Work on the horizontal plane at the standing foot's height.
+    let cp = Vec3::new(capture_point.x, stance.y, capture_point.z);
+    let error = (cp - body.support_center) * Vec3::new(1.0, 0.0, 1.0);
     let mut target = cp + error.normalize_or_zero() * STEP_OVERSHOOT + body.left * side.sign() * 0.09;
     let across = (target - stance).dot(body.left) * side.sign();
     if across < 0.14 {
         target += body.left * side.sign() * (0.14 - across);
     }
-    ((target - stance).length() <= MAX_STEP).then_some(target)
+    if (target - stance).length() > MAX_STEP {
+        return None;
+    }
+    // How high is the ground where the foot would land? (Stairs, ledges.)
+    let (ground, _) = ground_below(rapier, target + Vec3::Y * (MAX_STEP_UP + 0.05), MAX_STEP_UP + MAX_STEP_DOWN + 0.05)?;
+    Some(Vec3::new(target.x, ground.y, target.z))
 }
 
 /// Joint angles (hip, knee, ankle) that put a leg's ankle at `ankle_world`
@@ -351,6 +400,7 @@ fn think(
     mut people: Query<(&mut Balance, &Transform)>,
     parts: Query<(&RagdollPart, &Transform, &Velocity)>,
     mut targets: Query<(&RagdollPart, &mut JointTarget)>,
+    rapier: ReadRapierContext,
 ) {
     let Some((mut balance, pelvis)) = people.iter_mut().next() else { return };
     let body = sense(&parts, pelvis);
@@ -358,7 +408,9 @@ fn think(
     balance.time_in_state += dt;
 
     // Capture point: where the COM would come to rest (see the top of this file).
-    let height = body.com.y.max(0.1);
+    // Height of the COM above the ground the person stands on (not above y = 0:
+    // they might be on a platform).
+    let height = (body.com.y - body.ground_y).max(0.1);
     let capture_point = body.com + body.com_velocity * (height / GRAVITY).sqrt();
     let error = Vec3::new(capture_point.x - body.support_center.x, 0.0, capture_point.z - body.support_center.z);
     balance.com = body.com;
@@ -384,7 +436,7 @@ fn think(
             } else if balance.steps >= MAX_STEPS {
                 Some(falling)
             } else {
-                match plan_step(&body, capture_point, balance.last_step) {
+                match plan_step(&body, &rapier, capture_point, balance.last_step) {
                     Some((side, from, to)) => Some(BalanceState::Stepping { side, from, to }),
                     None => Some(falling),
                 }
@@ -403,7 +455,11 @@ fn think(
             Some(BalanceState::Standing)
         }
         // Landed: the COM is low, or we've been falling long enough.
-        BalanceState::Falling { .. } if body.com.y < 0.45 || balance.time_in_state > 2.5 => Some(BalanceState::Down),
+        // (The COM is low relative to the lowest body part: lying, whatever the
+        // ground height.)
+        BalanceState::Falling { .. } if body.com.y - body.lowest_y < 0.35 || balance.time_in_state > 2.5 => {
+            Some(BalanceState::Down)
+        }
         _ => None,
     };
     if let Some(next) = next {
@@ -421,12 +477,19 @@ fn think(
             let ankle_pitch = (forward_error * tuning.ankle_gain_forward).clamp(-max, max);
             let ankle_roll = (left_error * tuning.ankle_gain_sideways).clamp(-max, max);
             let hip_pitch = -forward_error * tuning.hip_gain;
+            let slope = |foot: Vec3| {
+                ground_below(&rapier, foot + Vec3::Y * 0.2, 0.5)
+                    .map(|(_, normal)| slope_compensation(normal, &body))
+                    .unwrap_or(Vec3::ZERO)
+            };
+            let (slope_l, slope_r) = (slope(body.foot_l), slope(body.foot_r));
             for (part, mut target) in &mut targets {
                 let mut angles = standing_pose(part.part);
                 match part.part {
                     BodyPart::FootL | BodyPart::FootR => {
                         angles.x += ankle_pitch + tuning.lean;
                         angles.z -= ankle_roll;
+                        angles += if part.part == BodyPart::FootL { slope_l } else { slope_r };
                     }
                     BodyPart::ThighL | BodyPart::ThighR => angles.x += hip_pitch,
                     _ => {}
@@ -439,7 +502,7 @@ fn think(
             // Keep aiming at where the capture point is *now*: people adjust
             // their step mid-swing. (If it's out of reach, keep the old target;
             // the fall check will take over.)
-            if let Some(new_to) = step_target(&body, capture_point, side) {
+            if let Some(new_to) = step_target(&body, &rapier, capture_point, side) {
                 to = new_to;
                 balance.state = BalanceState::Stepping { side, from, to };
             }

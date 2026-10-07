@@ -3,6 +3,41 @@
 Newest first. Each entry says what was built, how it was checked, and what
 you should look at when you run it.
 
+## Terrain: platform, stairs, ramp ✅ (partly, see the limits)
+
+You picked ledges, stairs and a ramp to push people off, but until now every
+test ran on flat ground at height 0, and the balance code quietly assumed
+the ground *was* at height 0.
+
+**Fixed**
+- Heights are measured from the actual ground under the feet (the lower
+  sole), and each step's landing height is found by casting a ray downward. So
+  stepping works on the 3 m platform, and steps up/down small heights work.
+- A ledge that drops more than 45 cm can't be stepped down: pushed near the
+  platform edge, the person falls off and ends up lying on the ground below
+  (that's a test).
+- "Has landed" no longer means "close to height 0" but "centre of mass close to
+  the lowest body part", so it works at any height.
+- Ankles compensate for sloped ground (measured by a ray under each foot), so
+  they can stand on the ramp facing up or down it.
+
+**Measured**
+
+| Where | Stands | 30 N·s forward | 30 N·s sideways |
+|---|---|---|---|
+| flat ground | ✅ | ✅ | ✅ |
+| 3 m platform | ✅ | ✅ | ✅ |
+| a stair step | ✅ | ❌ falls | ❌ falls |
+| ramp, facing uphill | ✅ | ✅ | ❌ falls |
+| ramp, facing across | ❌ falls | | |
+
+**Known limits**
+- **Across a slope** they can't stand: one foot is ~4.5 cm higher, and with
+  equal straight legs the body leans downhill. People bend the uphill knee. I
+  tried that and it broke flat-ground staggers, so I reverted it.
+- **Stairs:** treads are 60 cm deep; staggers drift toward a tread's edge and a
+  foot lands half on the step below. That would need proper foothold selection.
+
 ## Stage 3b: stepping (stagger) ✅
 
 **Built**

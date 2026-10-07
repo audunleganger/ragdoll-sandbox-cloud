@@ -329,6 +329,38 @@ fn a_stagger_takes_steps_and_ends_standing_still() {
 }
 
 // ---------------------------------------------------------------------------
+// Terrain: the platform, stairs and ramp from the map
+// ---------------------------------------------------------------------------
+
+#[test]
+fn on_the_platform_they_stand_and_catch_a_shove() {
+    let (stood, survived, _) = terrain_trial(Vec3::new(13.0, 3.0, -8.0), 0.0, 30.0, 1.0, 0.0);
+    assert!(stood && survived, "on the 3 m platform: stood={stood} survived 30 N·s={survived}");
+}
+
+#[test]
+fn on_the_ramp_facing_uphill_they_stand() {
+    let (stood, _, _) = terrain_trial(Vec3::new(-10.0, 1.13, -8.0), std::f32::consts::FRAC_PI_2, 0.0, 1.0, 0.0);
+    assert!(stood, "couldn't stand on the ramp facing uphill");
+}
+
+#[test]
+fn pushed_off_the_platform_edge_they_fall_to_the_ground_below() {
+    use ragdoll_sandbox::balance::BalanceState;
+    let mut app = active();
+    // Near the platform's +X edge (x = 16), facing it.
+    respawn_at(&mut app, Vec3::new(15.6, 3.0, -8.0), std::f32::consts::FRAC_PI_2);
+    run_seconds(&mut app, 1.0);
+    let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+    let (chest, _, _) = part(&mut app, BodyPart::Chest);
+    app.world_mut().get_mut::<ExternalImpulse>(chest).unwrap().impulse = pelvis.rotation * Vec3::Z * 40.0;
+    run_seconds(&mut app, 5.0);
+    let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+    assert!(pelvis.translation.y < 0.6, "expected them on the ground below, pelvis at {:.2} m", pelvis.translation.y);
+    assert_eq!(balance_state(&mut app), BalanceState::Down);
+}
+
+// ---------------------------------------------------------------------------
 // Diagnostics
 // ---------------------------------------------------------------------------
 
@@ -758,5 +790,69 @@ fn print_limits() {
         for _ in 0..240 { app.update(); }
         let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
         println!("30 N·s {name} at 60 Hz control: {}", if pelvis.translation.y > 0.8 { "stands" } else { "FALLS" });
+    }
+}
+
+/// Move the person to `feet` (facing `yaw`) and let them settle.
+fn respawn_at(app: &mut App, feet: Vec3, yaw: f32) {
+    use ragdoll_sandbox::ragdoll::SpawnRagdoll;
+    // Let the startup spawn happen first, or it would override ours.
+    app.update();
+    app.world_mut().write_message(SpawnRagdoll { position: feet, yaw });
+    run_seconds(app, 0.5);
+}
+
+/// Stand for `stand` seconds at a spot, then take a shove; report the result.
+fn terrain_trial(feet: Vec3, yaw: f32, shove: f32, forward: f32, left: f32) -> (bool, bool, f32) {
+    let mut app = active();
+    respawn_at(&mut app, feet, yaw);
+    run_seconds(&mut app, 5.0);
+    let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+    let stood = pelvis.translation.y - feet.y > 0.8;
+    let (chest, _, _) = part(&mut app, BodyPart::Chest);
+    let dir = pelvis.rotation * Vec3::Z * forward + pelvis.rotation * Vec3::X * left;
+    app.world_mut().get_mut::<ExternalImpulse>(chest).unwrap().impulse = dir * shove;
+    run_seconds(&mut app, 4.0);
+    let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+    (stood, pelvis.translation.y - feet.y > 0.8, pelvis.translation.y)
+}
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_terrain() {
+    let spots = [
+        ("ground", Vec3::new(0.0, 0.0, 0.0), 0.0),
+        ("platform", Vec3::new(13.0, 3.0, -8.0), 0.0),
+        ("stair 5", Vec3::new(6.7, 1.5, -8.0), 0.0),
+        ("ramp, facing uphill", Vec3::new(-10.0, 1.13, -8.0), std::f32::consts::FRAC_PI_2),
+        ("ramp, facing across", Vec3::new(-10.0, 1.13, -8.0), 0.0),
+    ];
+    for (name, feet, yaw) in spots {
+        for (dir, f, l) in [("fwd", 1.0, 0.0), ("left", 0.0, 1.0)] {
+            let (stood, survived, y) = terrain_trial(feet, yaw, 30.0, f, l);
+            println!("{name:<22} stands: {stood:<5} | 30 N·s {dir:<4}: {} (pelvis y {y:.2})", if survived { "ok" } else { "FALL" });
+        }
+    }
+}
+
+#[test]
+#[ignore = "diagnostic"]
+fn print_stair_shove() {
+    use ragdoll_sandbox::balance::{Balance, BalanceState};
+    let mut app = active();
+    respawn_at(&mut app, Vec3::new(6.7, 1.5, -8.0), 0.0);
+    run_seconds(&mut app, 2.0);
+    let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+    let (chest, _, _) = part(&mut app, BodyPart::Chest);
+    app.world_mut().get_mut::<ExternalImpulse>(chest).unwrap().impulse = pelvis.rotation * Vec3::Z * 30.0;
+    for i in 0..24 {
+        run_seconds(&mut app, 0.05);
+        let (_, fl, _) = part(&mut app, BodyPart::FootL);
+        let (_, fr, _) = part(&mut app, BodyPart::FootR);
+        let (_, pelvis, _) = part(&mut app, BodyPart::Pelvis);
+        let mut q = app.world_mut().query::<&Balance>();
+        let b = q.single(app.world()).unwrap();
+        let st = match b.state { BalanceState::Stepping { to, .. } => format!("STEP to {to:.2}"), s => format!("{s:?}").chars().take(8).collect() };
+        println!("t={:.2} pelvis={:.2} footL={:.2} footR={:.2} cp={:.2} {st}", (i + 1) as f32 * 0.05, pelvis.translation, fl.translation, fr.translation, b.capture_point);
     }
 }
